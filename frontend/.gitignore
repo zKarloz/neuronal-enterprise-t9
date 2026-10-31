@@ -1,0 +1,6 @@
+# Archivos de compilación, dependencias y verificaciones temporales.
+node_modules/
+dist/
+.test-build/
+.qa/
+.DS_Store
