@@ -1,12 +1,35 @@
-/** Sesión Supabase del usuario, inicializada solo al activar modo remoto. */
-import {createClient,type SupabaseClient} from '@supabase/supabase-js';
-import {apiUrl,supabaseUrl,supabaseKey,configured} from './config';
-let client: SupabaseClient | null=null;
-export function supabase(){if(!configured)return null;return client??(client=createClient(supabaseUrl,supabaseKey));}
-export interface RemoteProject{id:string;owner_id:string;name:string;description:string;status:'active'|'archived';created_at:string;updated_at:string;}
-export async function request<T>(route:string,token:string,method='GET',body?:object):Promise<T>{
- const res=await fetch(`${apiUrl}/api/v1${route}`,{method,headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
- if(!res.ok){let message=`Error HTTP ${res.status}`;try{const data:unknown=await res.json();if(data&&typeof data==='object'&&'detail'in data&&typeof data.detail==='string')message=data.detail;}catch{/* Respuesta sin JSON */}throw new Error(message);}
- if(res.status===204)return undefined as T;
- return res.json() as Promise<T>;
+/** Cliente REST compartido. Nunca accede a la API o SDK de Supabase. */
+import { apiUrl } from './config';
+
+export interface RemoteProject {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string;
+  status: 'active' | 'archived';
+  created_at: string;
+  updated_at: string;
+}
+
+export async function request<T>(route: string, token?: string, method = 'GET', body?: object): Promise<T> {
+  const response = await fetch(`${apiUrl}/api/v1${route}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) {
+    let message = `Error HTTP ${response.status}`;
+    try {
+      const data: unknown = await response.json();
+      if (data && typeof data === 'object' && 'detail' in data && typeof data.detail === 'string') {
+        message = data.detail;
+      }
+    } catch { /* Algunos errores no contienen JSON. */ }
+    throw new Error(message);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
 }

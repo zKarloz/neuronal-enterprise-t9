@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import current_user, Identity
 from app.api.projects import router
+from app.api.authentication import router as authentication_router
 app=FastAPI(title="NeuroLab Enterprise",version="0.4.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings().origins,allow_credentials=False,allow_methods=["GET","POST","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type"])
 @app.get("/api/v1/health")
@@ -19,3 +20,4 @@ def ready(db:Session=Depends(get_db)):
 @app.get("/api/v1/me")
 def me(identity:Identity=Depends(current_user)):return {"id":identity.id,"email":identity.email}
 app.include_router(router,prefix="/api/v1")
+app.include_router(authentication_router,prefix="/api/v1")
