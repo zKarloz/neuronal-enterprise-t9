@@ -1,5 +1,5 @@
 /**
- * Inicio de sesión por OTP usando exclusivamente nuestra API.
+ * Sesiones OAuth/OTP usando exclusivamente nuestra API.
  * La sesión se conserva solo en esta pestaña mediante sessionStorage.
  * Para producción de mayor escala: BFF con cookies HttpOnly, CSRF y mismo dominio.
  */
@@ -28,6 +28,13 @@ function toSession(data: TokenResponse, fallbackEmail = ''): RemoteSession {
     email: data.email || fallbackEmail,
     expires_at: Date.now() + data.expires_in * 1000,
   };
+}
+
+/** Guardar una respuesta OAuth/OTP para reutilizar la renovación actual. */
+export function saveTokenResponse(data: TokenResponse): RemoteSession {
+  const result = toSession(data);
+  saveSession(result);
+  return result;
 }
 
 export function loadSession(): RemoteSession | null {

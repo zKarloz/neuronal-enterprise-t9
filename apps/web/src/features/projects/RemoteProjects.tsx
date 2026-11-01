@@ -1,22 +1,48 @@
 /** M02 remoto: proyectos reales vía FastAPI, sin conexión directa a Supabase. */
 import { useEffect, useState } from 'react';
-import { Cloud, KeyRound, Loader2, Mail, RefreshCw, LogOut, Plus, Trash2 } from 'lucide-react';
+import { Cloud, Loader2, RefreshCw, LogOut, Plus, Trash2, ShieldCheck } from 'lucide-react';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
-import { clearSession, ensureSession, loadSession, logout, sendOtp, verifyOtp, type RemoteSession } from '../../lib/api/session';
+import { clearSession, ensureSession, loadSession, logout, type RemoteSession } from '../../lib/api/session';
 import { Notice, StatusPill, formatDate } from '../../components/ui';
+import { startGoogleOAuth, consumeGoogleReturn, completeGoogleOAuth } from '../../lib/api/google-oauth';
+
+// Compartir el intercambio entre los dos montajes de React.StrictMode.
+let oauthTask: Promise<RemoteSession> | null = null;
+function pendingOAuth(): Promise<RemoteSession> | null {
+  if (!oauthTask) {
+    const callback = consumeGoogleReturn();
+    if (callback) oauthTask = completeGoogleOAuth(callback);
+  }
+  return oauthTask;
+}
 
 export function RemoteProjects() {
   const [session, setSession] = useState<RemoteSession | null>(() => loadSession());
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [projects, setProjects] = useState<RemoteProject[]>([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const task = pendingOAuth();
+    if (task) {
+      setBusy(true);
+      void task.then(result => {
+        if (alive) { setSession(result); setMessage('Sesión de Google iniciada.'); }
+      }).catch((cause: unknown) => {
+        if (alive) setError(cause instanceof Error ? cause.message : 'No se pudo iniciar sesión.');
+      }).finally(() => {
+        if (alive) setBusy(false);
+        // El código es de un solo uso: no se reutiliza para nuevos intentos.
+        oauthTask = null;
+      });
+    }
+    return () => { alive = false; };
+  }, []);
 
   async function activeSession(): Promise<RemoteSession> {
     if (!session) throw new Error('Inicia sesión para continuar.');
@@ -27,7 +53,7 @@ export function RemoteProjects() {
     } catch {
       clearSession();
       setSession(null);
-      throw new Error('La sesión expiró. Solicita un nuevo código de acceso.');
+      throw new Error('La sesión expiró. Vuelve a iniciar sesión con Google.');
     }
   }
 
@@ -72,25 +98,12 @@ export function RemoteProjects() {
     </div>
     {error && <Notice tone="error">{error}</Notice>}
     {!session ? <div className="panel max-w-lg space-y-4 p-5">
-      {!sent ? <form className="space-y-3" onSubmit={event => { event.preventDefault(); void action(async () => {
-        await sendOtp(email.trim());
-        setSent(true);
-        setMessage('Revisa tu correo e introduce el código recibido.');
-      }); }}>
-        <label htmlFor="remote-email" className="field-label">Correo electrónico</label>
-        <input id="remote-email" className="field" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)}/>
-        <button type="submit" disabled={busy} className="btn-primary">{busy ? <Loader2 size={16} className="animate-spin"/> : <Mail size={16}/>} Enviar código</button>
-      </form> : <form className="space-y-3" onSubmit={event => { event.preventDefault(); void action(async () => {
-        const authenticated = await verifyOtp(email.trim(), code.trim());
-        setSession(authenticated);
-        setCode('');
-        setSent(false);
-      }); }}>
-        <p className="text-sm text-slate-600">Código enviado a <strong>{email}</strong></p>
-        <label htmlFor="remote-code" className="field-label">Código de verificación</label>
-        <input id="remote-code" type="text" inputMode="numeric" pattern="[0-9]{6,8}" minLength={6} maxLength={8} autoComplete="one-time-code" className="field" required value={code} onChange={event => setCode(event.target.value)}/>
-        <div className="flex flex-wrap gap-3"><button className="btn-primary" disabled={busy} type="submit">{busy ? <Loader2 size={16} className="animate-spin"/> : <KeyRound size={16}/>} Validar e ingresar</button><button className="btn-outline" type="button" disabled={busy} onClick={() => { setSent(false); setCode(''); setMessage(''); }}>Cambiar correo</button></div>
-      </form>}
+      <h3 className="text-sm font-bold text-ink">Acceder a proyectos del servidor</h3>
+      <p className="text-sm text-slate-600">Usa tu cuenta Google para acceder de forma segura sin contraseñas ni códigos por correo.</p>
+      <button type="button" className="btn-primary" disabled={busy} onClick={() => void action(startGoogleOAuth)}>
+        {busy ? <Loader2 size={16} className="animate-spin"/> : <ShieldCheck size={17}/>} Continuar con Google
+      </button>
+      <p className="text-xs text-slate-500">Se abrirá Google. Solo solicitamos tu identidad básica (nombre y correo).</p>
       {message && <Notice tone="success">{message}</Notice>}
     </div> : <>
       <div className="flex flex-wrap items-center justify-between gap-3">

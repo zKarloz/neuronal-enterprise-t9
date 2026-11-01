@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import {Cloud,HardDrive} from 'lucide-react';
 import {RemoteProjects} from './RemoteProjects';
+import { hasGoogleReturn } from '../../lib/api/google-oauth';
 import { Archive, CheckCircle2, CirclePlus, FolderKanban, Pencil, Search, Trash2, Undo2 } from 'lucide-react';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { EmptyState, Heading, Modal, Notice, StatusPill, formatDate } from '../../components/ui';
@@ -30,7 +31,7 @@ export function ProjectModal({ onClose, editing }: { onClose: () => void; editin
 
 export default function Projects({ onNewProject }: { onNewProject: () => void }) {
   const { data, activeProject, selectProject, editProject, deleteProject } = useWorkspace();
-  const [mode,setMode]=useState<'local'|'remote'>('local');
+  const [mode,setMode]=useState<'local'|'remote'>(() => hasGoogleReturn() ? 'remote' : 'local');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'archived'>('all');
   const [edit, setEdit] = useState<Project | null>(null);
