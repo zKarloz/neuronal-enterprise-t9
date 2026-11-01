@@ -4,7 +4,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = ""
     supabase_url: str = ""
+    supabase_publishable_key: str = ""
     frontend_origins: str = "http://localhost:5173"
+    # URL fija para evitar redirecciones a dominios no autorizados.
+    oauth_callback_url: str = ""
+    oauth_frontend_url: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     @property
     def origins(self):

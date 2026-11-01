@@ -1,68 +1,61 @@
-# NeuroLab Enterprise — v0.4.0 (Base de plataforma)
+# NeuroLab Enterprise — v0.4.2 (Google OAuth con API propia)
 
-Plataforma web para crear proyectos de IA, diseñar redes neuronales y ejecutar experimentos reales. Esta versión conserva el laboratorio **v0.3.1** en el navegador e introduce una **API autenticada opcional** para proyectos remotos.
+Plataforma de redes neuronales con laboratorio local en React/TypeScript/TensorFlow.js y una primera integración opcional con FastAPI, Render y Supabase.
 
-## Estructura
+## Carpetas
 
 ```text
-frontend/                  # Vite + React + TypeScript + Tailwind + Lucide + TensorFlow.js
-  src/features/             # Los diez módulos M01–M10, sin eliminaciones
-  src/lib/api/              # Nueva capa de acceso a FastAPI/Supabase Auth
-services/api/              # FastAPI, SQLAlchemy, migraciones Alembic, pruebas
-infra/                     # Reservado para infraestructura futura
-workers/training/          # Reservado para entrenamiento aislado (NO implementado)
-docs/architecture/         # Decisiones técnicas y contratos
-docs/operations/           # Despliegue Vercel + Render + Supabase
+apps/web/                  # Frontend actual: Vite, React, Tailwind, Lucide
+services/api/              # FastAPI, auth, CRUD de proyectos, Alembic
+workers/training/          # Reservado para TensorFlow/Keras (pendiente)
+infra/                     # Infraestructura
+ docs/                     # Arquitectura, despliegue y operaciones
 ```
 
-**Compatibilidad con Vercel:** el `Root Directory` continúa siendo **`frontend`**. No hemos movido la aplicación a `apps/web` para evitar romper el despliegue actual.
+Vercel: **Root Directory `apps/web`**. Render: **Root Directory `services/api`**.
 
-## Modo local (sin backend)
+## Funcionalidad
+
+- Los diez módulos existentes, sus proyectos locales, CNN 8×8 y predicciones se conservan.
+- La pestaña M02 → Servidor usa exclusivamente nuestra API FastAPI para autenticación mediante OTP de correo y CRUD de proyectos.
+- FastAPI utiliza Supabase Auth como proveedor de identidad y PostgreSQL para los proyectos y eventos de auditoría.
+- El frontend solo requiere `VITE_API_BASE_URL`; **no utiliza `supabase-js` ni necesita una clave de Supabase**.
+- La sesión remota está limitada a la pestaña (sessionStorage). Sus límites y controles pendientes se documentan en la guía.
+
+## Instrucciones
+
+**Guía de integración y despliegue:** [`docs/operations/INTEGRACION_API_PROPIA_V041.md`](docs/operations/INTEGRACION_API_PROPIA_V041.md)
 
 ```bash
-cd frontend
+# Frontend
+cd apps/web
 npm install
 npm run test:core
 npm run typecheck
 npm run build
-npm run dev
-```
 
-La pestaña **Navegador** de M02 y todos los entrenamientos locales siguen utilizando `localStorage` y TensorFlow.js. No se generan resultados o métricas ficticias.
-
-## Modo servidor (opt-in)
-
-Consulta [`docs/operations/RENDER_SUPABASE_VERCEL.md`](docs/operations/RENDER_SUPABASE_VERCEL.md) para configurar Supabase, aplicar migraciones, desplegar API Render y añadir variables públicas Vercel.
-
-La pestaña **Servidor** de M02 permite autenticarse por magic link, listar, crear, archivar/restaurar y eliminar proyectos remotos de PostgreSQL. La separación de estados es intencional: no se migra nada automáticamente desde el navegador.
-
-## Endpoints incluidos
-
-| Método | Ruta | Auth | Descripción |
-| --- | --- | --- | --- |
-| GET | `/api/v1/health` | No | Estado de API. |
-| GET | `/api/v1/ready` | No | Conectividad PostgreSQL. |
-| GET | `/api/v1/me` | Sí | Identidad verificada. |
-| GET | `/api/v1/projects` | Sí | Solo proyectos propios o asignados. |
-| POST | `/api/v1/projects` | Sí | Crear proyecto; auditar. |
-| GET | `/api/v1/projects/{id}` | Sí | Detalle autorizado. |
-| PATCH | `/api/v1/projects/{id}` | Sí | Modificar con rol owner/manager. |
-| DELETE | `/api/v1/projects/{id}` | Sí | Eliminar solo propietario; auditar. |
-
-**Seguridad:** Supabase Auth (JWT RS256/ES256 verificado en backend), autorización en API y RLS activo sin políticas de exposición en base. Las credenciales de DB permanecen solo en el servidor.
-
-## Pruebas
-
-```bash
+# Backend (en otra terminal)
 cd services/api
-pip install -r requirements-dev.txt
-pytest -q
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-Pruebas backend con SQLite en memoria sin necesidad de cuenta Supabase; despliegue real exclusivamente con PostgreSQL. Verificaciones local/frontend y configuración end-to-end se completan después de instalar las dependencias y conectar servicios reales.
+## Endpoints
 
-## Estado de las fases
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| GET | `/api/v1/health` | Estado de API |
+| GET | `/api/v1/ready` | Conexión PostgreSQL |
+| POST | `/api/v1/auth/otp` | Solicitar código por email |
+| POST | `/api/v1/auth/verify` | Verificar código y crear sesión |
+| POST | `/api/v1/auth/refresh` | Renovar sesión |
+| POST | `/api/v1/auth/logout` | Cerrar sesión |
+| GET | `/api/v1/me` | Identidad autenticada |
+| GET/POST | `/api/v1/projects` | Listar y crear proyectos autorizados |
+| GET/PATCH/DELETE | `/api/v1/projects/{id}` | Consultar, editar y eliminar |
 
-**v0.4.0:** base API/proyectos ✅ (código); despliegue real en Render/Supabase pendiente de configuración. **v0.5.0:** carga, validación y persistencia CSV. **v0.6.0:** workers TensorFlow/Keras y cola. **v0.7.0:** métricas SSE, evaluación y versiones de modelos.
+La nueva capa de autenticación **no necesita nuevas migraciones de datos**. Entrenamiento remoto, datasets de servidor y sincronización de modelos siguen pendientes de implementar.
 
-Desarrollado a partir del Documento Maestro de Desarrollo y la especificación CSV Real-Time de NeuroLab Enterprise (Semana 11).
+## Autenticación Google OAuth — v0.4.2
+
+La implementación Google OAuth con API propia y PKCE se documenta en `docs/operations/GOOGLE_OAUTH_V042.md`. Para el despliegue a Render, configura `OAUTH_CALLBACK_URL` y `OAUTH_FRONTEND_URL` como indica esa guía.
