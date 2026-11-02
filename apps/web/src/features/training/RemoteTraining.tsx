@@ -1,0 +1,164 @@
+/** M06 remoto: trabajos persistentes de FastAPI con seguimiento REST, sin valores simulados. */
+import { useCallback, useEffect, useState } from 'react';
+import { Activity, Ban, BrainCircuit, CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
+import { configured } from '../../lib/api/config';
+import { request, type RemoteProject } from '../../lib/api/client';
+import { ensureSession, loadSession } from '../../lib/api/session';
+import { type RemoteDataset } from '../../lib/api/datasets';
+import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
+  type DenseLayer, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
+import { EmptyState, Heading, Notice } from '../../components/ui';
+import type { Page } from '../../app/App';
+
+const STATES: Record<RemoteJob['status'], string> = {
+  QUEUED: 'En cola', PREPARING: 'Preparando', RUNNING: 'Entrenando',
+  COMPLETED: 'Completado', FAILED: 'Fallido', CANCELLED: 'Cancelado',
+};
+const INIT_LAYERS: DenseLayer[] = [{ units: 32, activation: 'relu' }, { units: 16, activation: 'relu' }];
+const metric = (v: number | null) => v === null || !Number.isFinite(v) ? '—' : v.toFixed(5);
+
+export default function RemoteTraining({ navigate }: { navigate: (page: Page) => void }) {
+  const [projects, setProjects] = useState<RemoteProject[]>([]);
+  const [projectId, setProjectId] = useState('');
+  const [datasets, setDatasets] = useState<RemoteDataset[]>([]);
+  const [datasetId, setDatasetId] = useState('');
+  const [architectures, setArchitectures] = useState<RemoteArchitecture[]>([]);
+  const [architectureId, setArchitectureId] = useState('');
+  const [name, setName] = useState('Feedforward remoto');
+  const [layers, setLayers] = useState<DenseLayer[]>(INIT_LAYERS);
+  const [jobs, setJobs] = useState<RemoteJob[]>([]);
+  const [jobId, setJobId] = useState('');
+  const [metrics, setMetrics] = useState<EpochMetric[]>([]);
+  const [models, setModels] = useState<RemoteModel[]>([]);
+  const [epochs, setEpochs] = useState(10);
+  const [batchSize, setBatchSize] = useState(32);
+  const [rate, setRate] = useState(0.001);
+  const [seed, setSeed] = useState(42);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const selectedJob = jobs.find(job => job.id === jobId);
+  const prepared = datasets.filter(item => item.prep_json !== null);
+
+  const token = useCallback(async () => {
+    const session = loadSession();
+    if (!session) throw new Error('Inicia sesión con Google desde M02 → Servidor.');
+    return (await ensureSession(session)).access_token;
+  }, []);
+
+  const refresh = useCallback(async (project: string) => {
+    if (!project) return;
+    const access = await token();
+    const [ds, arch, runs, saved] = await Promise.all([
+      request<RemoteDataset[]>(`/projects/${project}/datasets`, access),
+      getArchitectures(project, access), getJobs(project, access), getModels(project, access),
+    ]);
+    setDatasets(ds); setArchitectures(arch); setJobs(runs); setModels(saved);
+    setDatasetId(old => ds.some(item => item.id === old) ? old : (ds.find(item => item.prep_json)?.id ?? ''));
+    setArchitectureId(old => arch.some(item => item.id === old) ? old : (arch[0]?.id ?? ''));
+    setJobId(old => runs.some(job => job.id === old) ? old : (runs[0]?.id ?? ''));
+  }, [token]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!configured || !loadSession()) return;
+    void token().then(access => request<RemoteProject[]>('/projects', access)).then(rows => {
+      if (alive) { setProjects(rows); setProjectId(rows[0]?.id ?? ''); }
+    }).catch(err => { if (alive) setError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); });
+    return () => { alive = false; };
+  }, [token]);
+  useEffect(() => {
+    setDatasets([]); setArchitectures([]); setJobs([]); setMetrics([]); setModels([]);
+    if (!projectId) return;
+    void refresh(projectId).catch(err => setError(err instanceof Error ? err.message : 'Error de conexión.'));
+  }, [projectId, refresh]);
+
+  // REST es fuente de verdad; polling solo mientras el usuario observa esta vista.
+  useEffect(() => {
+    if (!projectId) return;
+    let active = true;
+    const interval = window.setInterval(() => {
+      void refresh(projectId).catch(err => { if (active) setError(err instanceof Error ? err.message : 'Error al actualizar.'); });
+    }, 8000);
+    return () => { active = false; window.clearInterval(interval); };
+  }, [projectId, refresh]);
+  useEffect(() => {
+    if (!projectId || !jobId) { setMetrics([]); return; }
+    let active = true;
+    void token().then(access => getMetrics(projectId, access, jobId)).then(rows => {
+      if (active) setMetrics(rows);
+    }).catch(err => { if (active) setError(err instanceof Error ? err.message : 'No se pudieron leer métricas.'); });
+    return () => { active = false; };
+  }, [projectId, jobId, jobs, token]);
+
+  async function action(work: () => Promise<void>) {
+    setBusy(true); setError(''); setNotice('');
+    try { await work(); }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo completar la operación.'); }
+    finally { setBusy(false); }
+  }
+  const updateLayer = (index: number, change: Partial<DenseLayer>) =>
+    setLayers(current => current.map((layer, i) => i === index ? { ...layer, ...change } : layer));
+
+  if (!configured) return <Notice tone="warning">Configura VITE_API_BASE_URL para habilitar M06 remoto.</Notice>;
+  if (!loadSession()) return <><Heading eyebrow="Laboratorio · M06" title="Entrenamientos del servidor"/>
+    <div className="panel p-6"><EmptyState icon={<ShieldCheck size={28}/>} title="Se requiere iniciar sesión" description="Entra con Google desde M02 → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div></>;
+  return <div className="space-y-5">
+    <Heading eyebrow="Experimentación · M06 · Servidor" title="Entrenamiento Feedforward remoto"
+      description="Trabajos persistidos en PostgreSQL; TensorFlow/Keras se ejecuta en un worker Python independiente. El navegador nunca ejecuta el entrenamiento remoto."/>
+    <Notice tone="warning">Para empezar un trabajo debes mantener el worker Python ejecutándose en tu equipo. Los trabajos en cola permanecen guardados aunque cierres el navegador.</Notice>
+    {error && <Notice tone="error">{error}</Notice>}
+    {notice && <Notice tone="success">{notice}</Notice>}
+    <section className="panel flex flex-wrap items-end gap-3 p-5">
+      <div className="min-w-[220px] flex-1"><label className="field-label" htmlFor="remote-training-project">Proyecto remoto</label><select id="remote-training-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>
+        {!projects.length && <option value="">Sin proyectos</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select></div>
+      <button className="btn-outline" disabled={busy || !projectId} onClick={() => void action(() => refresh(projectId))}><RefreshCw size={16}/> Actualizar</button>
+      <span className="text-xs text-slate-500"><Cloud size={15} className="inline"/> API propia</span>
+    </section>
+    {!projectId ? <div className="panel p-5"><EmptyState icon={<Database size={24}/>} title="Crea un proyecto remoto" description="Visita M02 → Servidor para continuar." action={<button className="btn-primary" onClick={() => navigate('projects')}>Ir a M02</button>}/></div> : <>
+      <div className="grid gap-5 xl:grid-cols-2">
+        <section className="panel p-5 space-y-4">
+          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><BrainCircuit size={19}/> Arquitecturas Feedforward</h2>
+          <div><label htmlFor="arch-name" className="field-label">Nombre</label><input id="arch-name" className="field" maxLength={100} value={name} onChange={e => setName(e.target.value)}/></div>
+          {layers.map((layer, i) => <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+            <div><label className="field-label" htmlFor={`units-${i}`}>Capa {i + 1} · neuronas</label><input id={`units-${i}`} className="field" type="number" min={2} max={128} value={layer.units} onChange={e => updateLayer(i, { units: Number(e.target.value) })}/></div>
+            <div><label className="field-label" htmlFor={`activation-${i}`}>Activación</label><select id={`activation-${i}`} className="field" value={layer.activation} onChange={e => updateLayer(i, { activation: e.target.value as DenseLayer['activation'] })}><option value="relu">ReLU</option><option value="tanh">Tanh</option><option value="sigmoid">Sigmoid</option></select></div>
+            <button aria-label={`Eliminar capa ${i + 1}`} className="btn-outline" disabled={layers.length === 1} onClick={() => setLayers(ls => ls.filter((_, ix) => ix !== i))}><Ban size={16}/></button>
+          </div>)}
+          <div className="flex flex-wrap gap-2"><button className="btn-outline" disabled={layers.length >= 4} onClick={() => setLayers(old => [...old, { units: 16, activation: 'relu' }])}><Plus size={16}/> Capa</button>
+            <button className="btn-primary" disabled={busy} onClick={() => void action(async () => { const item = await createArchitecture(projectId, await token(), name, layers); await refresh(projectId); setArchitectureId(item.id); setNotice(`Arquitectura ${item.name}, versión ${item.version}, guardada.`); })}><CheckCircle2 size={16}/> Guardar versión</button></div>
+          <p className="text-xs text-slate-500">Solo capas densas (1–4); la salida se configura según el dataset. Cada guardado crea una versión inmutable.</p>
+        </section>
+        <section className="panel p-5 space-y-4">
+          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Activity size={19}/> Nuevo entrenamiento</h2>
+          <div><label className="field-label" htmlFor="remote-job-dataset">Dataset preparado (M05)</label><select id="remote-job-dataset" className="field" value={datasetId} onChange={e => setDatasetId(e.target.value)}><option value="">Seleccionar dataset</option>{prepared.map(d => <option key={d.id} value={d.id}>{d.name} · v{d.version} · {d.prep_json?.task}</option>)}</select></div>
+          <div><label className="field-label" htmlFor="remote-job-architecture">Arquitectura guardada</label><select id="remote-job-architecture" className="field" value={architectureId} onChange={e => setArchitectureId(e.target.value)}><option value="">Seleccionar arquitectura</option>{architectures.map(a => <option key={a.id} value={a.id}>{a.name} · v{a.version}</option>)}</select></div>
+          <div className="grid grid-cols-2 gap-3">{([
+            ['Épocas', epochs, setEpochs, 1, 40, 'epochs-server'], ['Batch size', batchSize, setBatchSize, 1, 256, 'batch-server'],
+            ['Learning rate', rate, setRate, 0.000001, 0.1, 'lr-server'], ['Semilla', seed, setSeed, 0, 2147483647, 'seed-server'],
+          ] as const).map(([label, value, setter, min, max, id]) => <div key={id}><label className="field-label" htmlFor={id}>{label}</label><input id={id} type="number" min={min} max={max} step={id === 'lr-server' ? 0.0001 : 1} className="field" value={value} onChange={e => setter(Number(e.target.value))}/></div>)}</div>
+          {!prepared.length && <Notice tone="warning">Prepara primero un CSV remoto desde M05 → Servidor.</Notice>}
+          <button className="btn-primary w-full" disabled={busy || !datasetId || !architectureId || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
+            const item = await startJob(projectId, await token(), { architecture_id: architectureId, dataset_id: datasetId, epochs, batch_size: batchSize, learning_rate: rate, seed });
+            await refresh(projectId); setJobId(item.id); setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
+          })}>{busy ? <Loader2 size={17} className="animate-spin"/> : <Plus size={17}/>} Encolar entrenamiento</button>
+        </section>
+      </div>
+      <section className="panel p-5 space-y-4">
+        <h2 className="text-base font-bold text-ink">Monitor de trabajos persistidos</h2>
+        <label className="field-label" htmlFor="remote-job-monitor">Selecciona una ejecución</label>
+        <select id="remote-job-monitor" className="field" value={jobId} onChange={e => setJobId(e.target.value)}><option value="">Sin ejecuciones</option>{jobs.map(job => <option key={job.id} value={job.id}>{new Date(job.created_at).toLocaleString()} · {STATES[job.status]} · {job.epoch}/{job.epochs}</option>)}</select>
+        {selectedJob ? <>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><strong className="text-sm text-ink">{STATES[selectedJob.status]}</strong><p className="text-xs text-slate-500">Época {selectedJob.epoch} de {selectedJob.epochs}{selectedJob.cancel_requested ? ' · Cancelación solicitada' : ''}</p></div>
+            {['QUEUED', 'PREPARING', 'RUNNING'].includes(selectedJob.status) && <button className="btn-outline" disabled={busy || selectedJob.cancel_requested} onClick={() => void action(async () => { await cancelJob(projectId, await token(), selectedJob.id); await refresh(projectId); })}><Ban size={16}/> Solicitar cancelación</button>}</div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-primary-500 transition-all" style={{ width: `${selectedJob.progress}%` }}/></div>
+          <p className="text-xs text-slate-500">Progreso: {selectedJob.progress}% · {selectedJob.status === 'QUEUED' ? 'Esperando worker' : 'Estado guardado en PostgreSQL'}</p>
+          {selectedJob.error_message && <Notice tone="error">{selectedJob.error_message}</Notice>}
+          {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{metric(m.accuracy)}</td><td className="px-3 py-2">{metric(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
+          {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
+        </> : <EmptyState compact icon={<Activity size={25}/>} title="Sin entrenamientos" description="Crea una arquitectura y encola una ejecución real."/>}
+      </section>
+    </>}
+  </div>;
+}

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     supabase_secret_key: str = ""
     supabase_service_role_key: str = ""
     dataset_bucket: str = "neurolab-datasets"
+    model_bucket: str = "neurolab-models"
     # URL fija para evitar redirecciones a dominios no autorizados.
     oauth_callback_url: str = ""
     oauth_frontend_url: str = ""

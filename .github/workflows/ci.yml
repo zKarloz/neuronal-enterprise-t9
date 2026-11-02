@@ -1,0 +1,50 @@
+# CI: valida cambios de código. No procesa trabajos enviados por usuarios.
+name: NeuroLab — pruebas de frontend y API
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: neurolab-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        # Si todavía no se versionó el lockfile, npm install lo reconstruye.
+        run: npm install --no-audit --no-fund
+      - name: Probar núcleo
+        run: npm run test:core
+      - name: Comprobar TypeScript
+        run: npm run typecheck
+      - name: Compilar frontend
+        run: npm run build
+
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/api/requirements-dev.txt
+      - name: Instalar backend y utilidades de prueba
+        run: python -m pip install -r services/api/requirements-dev.txt
+      - name: Pruebas API y permisos
+        env:
+          PYTHONPATH: services/api:.
+        run: python -m pytest -q services/api/tests

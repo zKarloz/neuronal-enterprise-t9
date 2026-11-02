@@ -12,3 +12,6 @@
 
 # Artefactos incrementales de TypeScript.
 **/*.tsbuildinfo
+
+# Entorno local del worker TensorFlow
+/.venv-worker/

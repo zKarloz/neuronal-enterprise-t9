@@ -1,0 +1,23 @@
+# Verificación manual de un entrenamiento real con datos UCI incluidos.
+# No usar workflow_dispatch ni Actions como worker de producción.
+name: NeuroLab — verificación Keras CPU
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  keras:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Instalar TensorFlow y API sin secretos
+        run: python -m pip install -r workers/training/requirements.txt
+      - name: Verificar entrenamiento Feedforward con dataset real
+        env:
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          OMP_NUM_THREADS: '2'
+        run: python workers/training/smoke_test.py

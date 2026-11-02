@@ -27,6 +27,19 @@ class PrivateStorage:
     def url(self, key: str) -> str:
         return self.endpoint + quote(self.bucket, safe="") + "/" + quote(key, safe="/")
 
+    async def upload_model(self, key: str, content: bytes) -> None:
+        """Guarda un artefacto .keras en bucket privado separado, sin exponer claves al navegador."""
+        bucket = settings().model_bucket
+        target = self.endpoint + quote(bucket, safe="") + "/" + quote(key, safe="/")
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                result = await client.post(target, headers={**self.headers,
+                    "Content-Type": "application/octet-stream", "x-upsert": "false"}, content=content)
+            if result.status_code not in (200, 201):
+                raise HTTPException(502, "No se pudo guardar el modelo en Storage privado.")
+        except httpx.HTTPError:
+            raise HTTPException(503, "Storage no respondió al guardar el modelo.") from None
+
     async def upload(self, key: str, content: bytes) -> None:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
