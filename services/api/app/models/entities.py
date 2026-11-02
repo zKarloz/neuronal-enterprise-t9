@@ -31,3 +31,23 @@ class AuditEvent(Base):
     project_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     action: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)
+
+# Los datos pesados permanecen en Supabase Storage; PostgreSQL solo guarda metadatos.
+from sqlalchemy import JSON, Integer, BigInteger, UniqueConstraint
+
+class DatasetRecord(Base):
+    __tablename__ = "datasets"
+    __table_args__ = (UniqueConstraint("project_id", "name", "version", name="uq_dataset_project_name_version"),)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    storage_key: Mapped[str] = mapped_column(String(200), unique=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    row_count: Mapped[int] = mapped_column(Integer)
+    column_count: Mapped[int] = mapped_column(Integer)
+    columns_json: Mapped[list] = mapped_column(JSON)
+    preview_json: Mapped[list] = mapped_column(JSON)
+    prep_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)

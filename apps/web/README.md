@@ -1,3 +1,5 @@
+> **v0.5.0:** Este frontend mantiene la ejecución local y añade **M05 → Servidor** para CSV remotos mediante FastAPI. Consulta `../../docs/operations/DATASETS_REMOTOS_V050.md` para configurar Supabase Storage y el despliegue. Los proyectos/datasets locales no se transfieren automáticamente.
+
 # NeuroLab Enterprise v0.3.1 — CNN con importación de fotografías propias
 
 **React + Vite + TypeScript + Tailwind CSS + Lucide React + TensorFlow.js.** Basado en el Documento Maestro NeuroLab Enterprise (M04, M05, M06, M07, M08 y estructura de los diez módulos, pp. 4–7).
