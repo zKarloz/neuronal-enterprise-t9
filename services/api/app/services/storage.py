@@ -1,0 +1,61 @@
+"""Acceso exclusivo del servidor a Supabase Storage privado.
+
+La clave service_role se conserva únicamente en Render. Las rutas se generan
+con UUID internos y nunca usan nombres de archivo provistos por usuarios.
+"""
+from urllib.parse import quote
+
+import httpx
+from fastapi import HTTPException
+from app.core.config import settings
+
+
+class PrivateStorage:
+    def __init__(self):
+        config = settings()
+        key = config.supabase_secret_key or config.supabase_service_role_key
+        if not (config.supabase_url and key):
+            raise HTTPException(503, "Supabase Storage no está configurado en la API.")
+        self.endpoint = config.supabase_url.rstrip("/") + "/storage/v1/object/"
+        self.bucket = config.dataset_bucket
+        # Para sb_secret_... el Gateway exige "apikey" y no un Bearer JWT.
+        # Con claves legacy service_role JWT también enviar Authorization Bearer.
+        self.headers = {"apikey": key}
+        if not key.startswith("sb_secret_"):
+            self.headers["Authorization"] = f"Bearer {key}"
+
+    def url(self, key: str) -> str:
+        return self.endpoint + quote(self.bucket, safe="") + "/" + quote(key, safe="/")
+
+    async def upload(self, key: str, content: bytes) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                result = await client.post(self.url(key), headers={**self.headers, "Content-Type": "text/csv", "x-upsert": "false"}, content=content)
+            if result.status_code not in (200, 201):
+                raise HTTPException(502, "No se pudo guardar el dataset en Supabase Storage. Comprueba el bucket privado y sus credenciales.")
+        except httpx.HTTPError:
+            raise HTTPException(503, "Supabase Storage no responde.") from None
+
+    async def read(self, key: str) -> bytes:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                result = await client.get(self.url(key).replace("/object/", "/object/authenticated/", 1), headers=self.headers)
+            if result.status_code != 200:
+                raise HTTPException(502, "No se pudo leer el archivo privado.")
+            return result.content
+        except httpx.HTTPError:
+            raise HTTPException(503, "Supabase Storage no responde.") from None
+
+    async def delete(self, key: str) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                result = await client.delete(self.url(key), headers=self.headers)
+            if result.status_code not in (200, 204):
+                raise HTTPException(502, "No se pudo eliminar el archivo privado.")
+        except httpx.HTTPError:
+            raise HTTPException(503, "Supabase Storage no responde.") from None
+
+
+def get_storage() -> PrivateStorage:
+    """Dependencia sustituible por un almacenamiento falso en las pruebas."""
+    return PrivateStorage()

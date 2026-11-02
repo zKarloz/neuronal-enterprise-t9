@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_publishable_key: str = ""
     frontend_origins: str = "http://localhost:5173"
+    # Preferimos sb_secret_... en Render (la clave legacy service_role es compatible).
+    supabase_secret_key: str = ""
+    supabase_service_role_key: str = ""
+    dataset_bucket: str = "neurolab-datasets"
     # URL fija para evitar redirecciones a dominios no autorizados.
     oauth_callback_url: str = ""
     oauth_frontend_url: str = ""

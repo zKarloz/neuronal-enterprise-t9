@@ -1,6 +1,7 @@
 // Importación de CSV validada en el navegador, sin enviar archivos a una API.
 import { useRef, useState } from 'react';
-import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Trash2, UploadCloud, Image, ScanLine } from 'lucide-react';
+import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Trash2, UploadCloud, Image, ScanLine, HardDrive, Cloud } from 'lucide-react';
+import RemoteDatasets from './RemoteDatasets';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { MAX_CSV_BYTES, datasetSummary, parseCsv } from '../../lib/csv';
 import { isDigitsDataset, MAX_DIGITS_CSV_BYTES, parseDigitsCsv } from '../../lib/digits';
@@ -9,7 +10,7 @@ import { download } from '../../lib/storage';
 import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
 import type { Page } from '../../app/App';
 
-export default function Datasets({ navigate }: { navigate: (page: Page) => void }) {
+function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
   const { activeProject, data, importDataset, removeDataset } = useWorkspace();
   const [candidate, setCandidate] = useState<{ name: string; headers: string[]; rows: number[][] } | null>(null);
   const [target, setTarget] = useState('');
@@ -80,5 +81,18 @@ export default function Datasets({ navigate }: { navigate: (page: Page) => void 
         <div className="mt-5 flex flex-wrap gap-2"><button onClick={exportCsv} className="btn-outline"><Download size={16}/> Exportar CSV</button><button onClick={remove} className="btn-danger"><Trash2 size={16}/> Eliminar</button></div>
       </>}
     </section></div>
+  </>;
+}
+
+
+/** Selector seguro: el laboratorio local sigue intacto, y el modo remoto es opcional. */
+export default function Datasets({ navigate }: { navigate: (page: Page) => void }) {
+  const [mode, setMode] = useState<'local' | 'remote'>('local');
+  return <>
+    <div className="mb-5 inline-flex gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Almacenamiento de datasets">
+      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode === 'local' ? 'bg-primary-50 text-primary-700' : 'text-slate-500'}`} onClick={() => setMode('local')}><HardDrive size={15}/> Navegador</button>
+      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode === 'remote' ? 'bg-primary-50 text-primary-700' : 'text-slate-500'}`} onClick={() => setMode('remote')}><Cloud size={15}/> Servidor</button>
+    </div>
+    {mode === 'local' ? <LocalDatasets navigate={navigate}/> : <RemoteDatasets navigate={navigate}/>}
   </>;
 }
