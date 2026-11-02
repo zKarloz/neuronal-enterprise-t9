@@ -49,7 +49,13 @@ def list_projects(identity: Identity=Depends(current_user),db: Session=Depends(g
     return db.scalars(select(Project).where(permitted(db,identity.id)).order_by(Project.created_at.desc())).all()
 @router.post("",response_model=ProjectView,status_code=201)
 def create(payload: ProjectCreate, identity: Identity=Depends(current_user),db: Session=Depends(get_db)):
-    if db.get(User, identity.id) is None: db.add(User(id=identity.id,email=identity.email))
+    # La tabla de usuarios de la aplicación es distinta de auth.users en Supabase.
+    # Insertar y confirmar el orden con flush antes de crear un proyecto que
+    # referencia a users.id mediante una clave foránea (sin cerrar la transacción).
+    if db.get(User, identity.id) is None:
+        db.add(User(id=identity.id, email=identity.email))
+        db.flush()
+
     item=Project(owner_id=identity.id,name=payload.name,description=payload.description.strip())
     db.add(item);db.flush()
     db.add(AuditEvent(actor_id=identity.id,project_id=item.id,action="project.created"));db.commit();db.refresh(item)
