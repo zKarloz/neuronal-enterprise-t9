@@ -1,0 +1,4 @@
+# Worker independiente: no instalar TensorFlow en Render Web Service.
+-r ../../services/api/requirements.txt
+tensorflow==2.20.0
+numpy>=1.26,<3

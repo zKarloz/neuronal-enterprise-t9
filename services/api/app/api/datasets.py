@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.projects import one, editor
 from app.core.auth import Identity, current_user
 from app.core.database import get_db
-from app.models.entities import AuditEvent, DatasetRecord
+from app.models.entities import AuditEvent, DatasetRecord, TrainingJob
 from app.services.csv_pipeline import CSVValidationError, MAX_CSV_BYTES, inspect_csv, prepare_csv
 from app.services.storage import PrivateStorage, get_storage
 
@@ -162,6 +162,9 @@ async def delete_dataset(project_id: UUID, dataset_id: UUID,
     project = one(db, project_id, identity)
     editable(db, project, identity)
     item = dataset_or_404(db, project_id, dataset_id)
+    # Un entrenamiento versionado necesita conservar su dataset original.
+    if db.scalar(select(TrainingJob.id).where(TrainingJob.dataset_id == item.id).limit(1)):
+        raise HTTPException(409, "El dataset está referenciado por un entrenamiento; no puede eliminarse.")
     # Borrar el objeto antes de quitar la referencia; si falla, conservar el metadato.
     await storage.delete(item.storage_key)
     db.delete(item)

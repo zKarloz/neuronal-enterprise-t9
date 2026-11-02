@@ -7,7 +7,7 @@ from sqlalchemy import select, exists, or_
 from sqlalchemy.orm import Session
 from app.core.auth import current_user, Identity
 from app.core.database import get_db
-from app.models.entities import User, Project, ProjectMember, AuditEvent, DatasetRecord
+from app.models.entities import User, Project, ProjectMember, AuditEvent, DatasetRecord, TrainingJob, ArchitectureRecord
 router=APIRouter(prefix="/projects", tags=["projects"])
 class ProjectCreate(BaseModel):
     name: str=Field(min_length=3,max_length=80)
@@ -79,6 +79,8 @@ def delete(pid:UUID,identity:Identity=Depends(current_user),db:Session=Depends(g
     # desde M05 antes de eliminar su proyecto (evita objetos privados huérfanos).
     if db.scalar(select(DatasetRecord.id).where(DatasetRecord.project_id == pid).limit(1)):
         raise HTTPException(409, "Elimina primero los datasets remotos del proyecto.")
+    if db.scalar(select(TrainingJob.id).where(TrainingJob.project_id == pid).limit(1)):
+        raise HTTPException(409, "El proyecto tiene entrenamientos registrados; archívalo en lugar de eliminarlo.")
     db.add(AuditEvent(actor_id=identity.id,project_id=None,action="project.deleted"))
     db.delete(item);db.commit()
     return Response(status_code=204)

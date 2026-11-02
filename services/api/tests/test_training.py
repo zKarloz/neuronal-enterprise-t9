@@ -1,0 +1,198 @@
+"""M04/M06: pruebas de permisos, FK, transiciones y preprocesamiento sin fuga."""
+from uuid import uuid4, UUID
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from app.core.auth import Identity, current_user
+from app.services.storage import get_storage
+from app.core.database import Base, get_db
+from app.main import app
+from app.models.entities import TrainingJob, TrainingMetric, ModelVersion
+from app.services.csv_pipeline import prepare_csv
+from workers.training.engine import encode_partition, claim, finish, record_epoch
+
+
+RAW = (b"edad,ciudad,resultado\n" + b"\n".join(
+    f"{20 + i},{'Lima' if i % 2 else 'Cusco'},{'si' if i % 2 else 'no'}".encode()
+    for i in range(16)) + b"\n")
+
+
+@pytest.fixture
+def lab():
+    eng = create_engine("sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    @event.listens_for(eng, "connect")
+    def fk(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+    Base.metadata.create_all(eng)
+    state = {"identity": Identity(uuid4(), "owner@example.org")}
+
+    def db():
+        with Session(eng) as session:
+            yield session
+    class UnusedStorage:
+        async def delete(self, _key):
+            raise AssertionError("El dataset referenciado no debe llegar a Storage.")
+    app.dependency_overrides[get_storage] = lambda: UnusedStorage()
+    app.dependency_overrides[get_db] = db
+    app.dependency_overrides[current_user] = lambda: state["identity"]
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client, eng, state
+    finally:
+        app.dependency_overrides.clear()
+        eng.dispose()
+
+
+def setup(lab):
+    client, eng, _ = lab
+    project = client.post("/api/v1/projects", json={"name": "Analítica de clientes"})
+    assert project.status_code == 201, project.text
+    pid = project.json()["id"]
+    arch = client.post(f"/api/v1/projects/{pid}/architectures", json={
+        "name": "Densa básica", "layers": [{"units": 12, "activation": "relu"}]})
+    assert arch.status_code == 201, arch.text
+    # Archivo real de prueba: filas usadas en preparación sin resultados inventados.
+    from app.models.entities import DatasetRecord
+    import hashlib
+    from uuid import uuid4
+    prep = prepare_csv(RAW, "resultado", "classification", 0.2, 0.2, 42)
+    with Session(eng) as db:
+        dataset = DatasetRecord(project_id=UUID(pid), name="clientes.csv", version=1,
+            storage_key=f"{pid}/{uuid4()}.csv", sha256=hashlib.sha256(RAW).hexdigest(),
+            size_bytes=len(RAW), row_count=16, column_count=3,
+            columns_json=[], preview_json=[], prep_json=prep)
+        db.add(dataset)
+        db.commit()
+        dataset_id = str(dataset.id)
+    return pid, arch.json()["id"], dataset_id
+
+
+def submit(client, pid, aid, did, **overrides):
+    return client.post(f"/api/v1/projects/{pid}/training-jobs", json={
+        "architecture_id": aid, "dataset_id": did,
+        "epochs": 3, "batch_size": 8, "learning_rate": 0.001, **overrides,
+    })
+
+
+def test_create_architecture_version_and_job_snapshot(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    newer = client.post(f"/api/v1/projects/{pid}/architectures", json={
+        "name": "Densa básica", "layers": [{"units": 20, "activation": "tanh"}]})
+    assert newer.status_code == 201 and newer.json()["version"] == 2
+    response = submit(client, pid, aid, did)
+    assert response.status_code == 202, response.text
+    job = response.json()
+    assert job["status"] == "QUEUED" and job["progress"] == 0 and job["epoch"] == 0
+    with Session(eng) as db:
+        record = db.get(TrainingJob, UUID(job["id"]))
+        assert record.config_snapshot["layers"][0]["units"] == 12
+        assert record.preparation_snapshot["split"]["train"] > 0
+        assert record.dataset_sha256
+    assert submit(client, pid, aid, did).status_code == 409
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{job['id']}").status_code == 200
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/metrics").json() == []
+
+
+def test_invalid_layers_and_unprepared_dataset(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    route = f"/api/v1/projects/{pid}/architectures"
+    assert client.post(route, json={"name": "Mal", "layers": [{"units": 0, "activation": "relu"}]}).status_code == 422
+    assert client.post(route, json={"name": "Correcto", "layers": [{"units": 8, "activation": "lambda"}]}).status_code == 422
+    assert submit(client, pid, aid, str(uuid4())).status_code == 422
+    with Session(eng) as db:
+        from app.models.entities import DatasetRecord
+        item = db.get(DatasetRecord, UUID(did))
+        item.prep_json = None
+        db.commit()
+    assert submit(client, pid, aid, did).status_code == 422
+
+
+def test_cancel_queued_and_requeue(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    stopped = client.post(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/cancel")
+    assert stopped.status_code == 200 and stopped.json()["status"] == "CANCELLED"
+    assert submit(client, pid, aid, did).status_code == 202
+    assert client.post(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/cancel").status_code == 409
+
+
+def test_permission_isolation_for_jobs_and_models(lab):
+    client, _, state = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    state["identity"] = Identity(uuid4(), "stranger@example.org")
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs").status_code == 404
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{job['id']}").status_code == 404
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/metrics").status_code == 404
+    assert client.post(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/cancel").status_code == 404
+    assert client.get(f"/api/v1/projects/{pid}/models").status_code == 404
+    assert client.post(f"/api/v1/projects/{pid}/architectures", json={
+        "name": "Intruso", "layers": [{"units": 8, "activation": "relu"}]}).status_code == 404
+
+
+def test_preprocessing_uses_real_rows_and_train_only_statistics():
+    prep = prepare_csv(RAW, "resultado", "classification", 0.2, 0.2, 42)
+    (train, ty), (validation, vy), (test, ey) = encode_partition(RAW, prep)
+    assert len(train) == prep["split"]["train"]
+    assert len(validation) == prep["split"]["validation"]
+    assert len(test) == prep["split"]["test"]
+    assert train.shape[1] == prep["input_dimensions"]
+    assert set(ty.tolist()) == {0, 1}
+    assert abs(float(train[:, 0].mean())) < 0.00001  # Escalador de train aplicado a train.
+    assert set(prep["indices"]["train"]).isdisjoint(prep["indices"]["validation"])
+    assert set(prep["indices"]["train"]).isdisjoint(prep["indices"]["test"])
+
+
+def test_prevent_deleting_referenced_dataset_and_project(lab):
+    client, _, _ = lab
+    pid, aid, did = setup(lab)
+    assert submit(client, pid, aid, did).status_code == 202
+    assert client.delete(f"/api/v1/projects/{pid}").status_code == 409
+    assert client.delete(f"/api/v1/projects/{pid}/datasets/{did}").status_code == 409
+
+
+def test_worker_claim_and_epoch_metrics_with_foreign_keys(lab, monkeypatch):
+    """La cola y las métricas se persisten con FK activas, sin simular cifras de Keras."""
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    from workers.training import engine as worker
+    monkeypatch.setattr(worker, "engine", lambda url: eng)
+    with Session(eng) as db:
+        found = claim(db)
+        assert found == UUID(job["id"])
+        assert db.get(TrainingJob, found).status == "PREPARING"
+        assert claim(db) is None
+        record = db.get(TrainingJob, found)
+        record.status = "RUNNING"
+        db.commit()
+    # Se emplean valores de prueba para validar el almacenamiento de la API,
+    # NO se presentan como métricas de un entrenamiento real.
+    record_epoch("test", found, 1, {"loss": 0.7, "val_loss": 0.8, "accuracy": 0.6, "val_accuracy": 0.55}, 3)
+    result = client.get(f"/api/v1/projects/{pid}/training-jobs/{found}/metrics")
+    assert result.status_code == 200 and len(result.json()) == 1
+    assert result.json()[0]["val_loss"] == 0.8
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{found}").json()["progress"] == 33
+    finish("test", found, "COMPLETED")
+    assert client.get(f"/api/v1/projects/{pid}/training-jobs/{found}").json()["progress"] == 100
+
+
+def test_running_cancel_is_cooperative(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    with Session(eng) as db:
+        item = db.get(TrainingJob, UUID(job["id"]))
+        item.status = "RUNNING"
+        db.commit()
+    response = client.post(f"/api/v1/projects/{pid}/training-jobs/{job['id']}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "RUNNING"  # El worker confirma el final.
+    assert response.json()["cancel_requested"] is True
