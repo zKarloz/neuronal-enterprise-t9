@@ -1,2 +1,2 @@
-// API pública del módulo evaluation; evita imports directos desde el shell.
-export { default } from './Evaluation';
+// API pública M07: selector local y remoto sin alterar el módulo local.
+export { default } from './EvaluationHub';

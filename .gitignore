@@ -13,5 +13,5 @@
 # Artefactos incrementales de TypeScript.
 **/*.tsbuildinfo
 
-# Entorno local del worker TensorFlow
+# Worker local y entornos Python administrados por uv.
 /.venv-worker/
