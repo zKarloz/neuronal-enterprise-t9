@@ -273,3 +273,83 @@ def test_sse_emits_real_snapshot_and_rejects_other_users(lab):
     state["identity"] = Identity(uuid4(), "intruder@example.org")
     assert client.get(url).status_code == 404
     assert client.post(f"/api/v1/projects/{pid}/training-jobs/{job_id}/retry").status_code == 404
+
+# v0.8: el modo opcional de Early Stopping se guarda también en los reintentos.
+def test_early_stopping_validation_and_retry_snapshot(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    assert submit(client, pid, aid, did, early_stopping_patience=11).status_code == 422
+    assert submit(client, pid, aid, did, early_stopping_patience=-1).status_code == 422
+    queued = submit(client, pid, aid, did, early_stopping_patience=3)
+    assert queued.status_code == 202, queued.text
+    jid = queued.json()["id"]
+    assert queued.json()["early_stopping_patience"] == 3
+    assert client.post(f"/api/v1/projects/{pid}/training-jobs/{jid}/cancel").status_code == 200
+    retried = client.post(f"/api/v1/projects/{pid}/training-jobs/{jid}/retry")
+    assert retried.status_code == 202
+    assert retried.json()["early_stopping_patience"] == 3
+    with Session(eng) as db:
+        record = db.get(TrainingJob, UUID(retried.json()["id"]))
+        assert record.early_stopping_patience == 3
+
+
+def test_model_registry_metadata_production_and_authorization(lab):
+    client, eng, state = lab
+    pid, aid, did = setup(lab)
+    first_job = submit(client, pid, aid, did).json()
+    with Session(eng) as db:
+        job = db.get(TrainingJob, UUID(first_job["id"]))
+        job.status = "COMPLETED"
+        db.add(ModelVersion(project_id=UUID(pid), job_id=job.id,
+            storage_key=f"{pid}/{job.id}.keras", sha256="a" * 64,
+            test_metrics={"loss": 0.5, "accuracy": 0.8}, best_epoch=2,
+            epochs_trained=3, early_stopped=False, name="Modelo alfa"))
+        db.commit()
+    second_job = submit(client, pid, aid, did).json()
+    with Session(eng) as db:
+        job = db.get(TrainingJob, UUID(second_job["id"]))
+        job.status = "COMPLETED"
+        db.add(ModelVersion(project_id=UUID(pid), job_id=job.id,
+            storage_key=f"{pid}/{job.id}.keras", sha256="b" * 64,
+            test_metrics={"loss": 0.4, "accuracy": 0.9}, best_epoch=1,
+            epochs_trained=2, early_stopped=True, name="Modelo beta"))
+        db.commit()
+    url = f"/api/v1/projects/{pid}/models"
+    models = client.get(url).json()
+    assert len(models) == 2
+    ids = {m["name"]: m["id"] for m in models}
+    first = ids["Modelo alfa"]
+    second = ids["Modelo beta"]
+    assert client.patch(f"{url}/{first}", json={"name": "  ", "stage": "production"}).status_code == 422
+    assert client.patch(f"{url}/{first}", json={"stage": "unapproved"}).status_code == 422
+    response = client.patch(f"{url}/{first}", json={"name": "Modelo publicado", "notes": "Prueba WDBC", "stage": "production"})
+    assert response.status_code == 200, response.text
+    assert response.json()["sha256"] == "a" * 64  # El artefacto no se sobrescribe.
+    assert response.json()["best_epoch"] == 2
+    other = client.patch(f"{url}/{second}", json={"stage": "production"})
+    assert other.status_code == 200
+    rows = client.get(url).json()
+    assert sum(m["stage"] == "production" for m in rows) == 1
+    assert next(m for m in rows if m["id"] == first)["stage"] == "candidate"
+    assert client.patch(f"{url}/{uuid4()}", json={"stage": "archived"}).status_code == 404
+    state["identity"] = Identity(uuid4(), "stranger@example.org")
+    assert client.patch(f"{url}/{second}", json={"name": "No autorizado"}).status_code == 404
+
+
+def test_public_reference_csvs_are_real_and_compatible():
+    """Los archivos públicos se prueban sin usar red ni métricas inventadas."""
+    from pathlib import Path
+    import csv
+    folder = Path(__file__).resolve().parents[3] / "samples" / "datasets"
+    expected = {"iris_sklearn.csv": (150, 5, 3),
+                "wine_sklearn.csv": (178, 14, 3),
+                "breast_cancer_wisconsin_sklearn.csv": (569, 31, 2)}
+    for filename, (rows, columns, classes) in expected.items():
+        raw = (folder / filename).read_bytes()
+        parsed = list(csv.DictReader(raw.decode("utf-8").splitlines()))
+        assert len(parsed) == rows
+        assert len(parsed[0]) == columns
+        assert len({r["target"] for r in parsed}) == classes
+        prep = prepare_csv(raw, "target", "classification", 0.15, 0.15, 42)
+        partitions = encode_partition(raw, prep)
+        assert sum(len(x) for x, _ in partitions) == rows

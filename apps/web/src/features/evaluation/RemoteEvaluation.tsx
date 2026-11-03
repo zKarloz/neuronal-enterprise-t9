@@ -1,12 +1,12 @@
 /** M07 remoto: muestra únicamente métricas almacenadas por Keras en PostgreSQL. */
 import { useEffect, useState } from 'react';
-import { Activity, CheckCircle2, Cloud, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Activity, CheckCircle2, Cloud, RefreshCw, ShieldCheck, Tags, Save, Pencil, Star } from 'lucide-react';
 import { MetricChart } from '../../components/MetricChart';
 import { EmptyState, Heading, Notice } from '../../components/ui';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession } from '../../lib/api/session';
-import { getJobs, getMetrics, getModels, type EpochMetric, type RemoteJob, type RemoteModel } from '../../lib/api/training';
+import { getJobs, getMetrics, getModels, updateModel, type EpochMetric, type RemoteJob, type RemoteModel, type ModelStage } from '../../lib/api/training';
 
 const number = (v: number | undefined | null) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(5);
 
@@ -21,6 +21,33 @@ export default function RemoteEvaluation() {
   const [comparison, setComparison] = useState<EpochMetric[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState('');
+  const [modelName, setModelName] = useState('');
+  const [modelNotes, setModelNotes] = useState('');
+  const [modelStage, setModelStage] = useState<ModelStage>('candidate');
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  function beginEdit(model: RemoteModel) {
+    // Los metadatos son editables; el modelo .keras y sus métricas no se sobrescriben.
+    setEditing(model.id); setModelName(model.name);
+    setModelNotes(model.notes); setModelStage(model.stage);
+    setNotice('');
+  }
+
+  async function saveMetadata(modelId: string) {
+    if (!projectId || saving) return;
+    setSaving(true); setError(''); setNotice('');
+    try {
+      const session = loadSession();
+      if (!session) throw new Error('Inicia sesión desde M02 → Servidor.');
+      const token = (await ensureSession(session)).access_token;
+      await updateModel(projectId, token, modelId, {name: modelName, notes: modelNotes, stage: modelStage});
+      setModels(await getModels(projectId, token));
+      setEditing(''); setNotice('Metadatos del modelo actualizados.');
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo actualizar el modelo.'); }
+    finally { setSaving(false); }
+  }
 
   useEffect(() => {
     if (!configured || !loadSession()) return;
@@ -40,7 +67,7 @@ export default function RemoteEvaluation() {
 
   useEffect(() => {
     let mounted = true;
-    setJobs([]); setModels([]); setMetrics([]); setComparison([]);
+    setJobs([]); setModels([]); setMetrics([]); setComparison([]); setEditing(''); setNotice('');
     if (!projectId) return;
     const load = async () => {
       setLoading(true); setError('');
@@ -95,6 +122,7 @@ export default function RemoteEvaluation() {
   return <div className="space-y-5">
     <Heading eyebrow="Análisis · M07 · Servidor" title="Evaluación de modelos Keras" description="Curvas de entrenamiento, validación y resultados de prueba guardados en PostgreSQL. Ninguna cifra es simulada."/>
     {error && <Notice tone="error">{error}</Notice>}
+    {notice && <Notice tone="success">{notice}</Notice>}
     <section className="panel grid gap-3 p-5 sm:grid-cols-2">
       <div><label className="field-label" htmlFor="evaluation-project">Proyecto</label><select id="evaluation-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>{!projects.length && <option value="">Sin proyectos</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
       <div className="flex items-end gap-2"><span className="text-xs text-slate-500"><Cloud size={15} className="inline"/> Datos remotos persistidos</span>{loading && <RefreshCw size={16} className="animate-spin text-slate-400"/>}</div>
@@ -115,5 +143,42 @@ export default function RemoteEvaluation() {
         </tbody></table>
       </section>}
     </>}
+    <section className="panel space-y-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Tags size={19}/> Registro de modelos</h2>
+        <span className="text-xs text-slate-500">Artefactos privados · trazabilidad por ejecución</span>
+      </div>
+      {!models.length && <p className="text-sm text-slate-500">Todavía no hay modelos guardados en este proyecto.</p>}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {models.map(m => {
+          const run = jobs.find(j => j.id === m.job_id);
+          return <article key={m.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div><h3 className="font-semibold text-ink">{m.name}</h3>
+                <p className="text-xs text-slate-500">{new Date(m.created_at).toLocaleString()} · {m.stage === 'production' ? 'Producción' : m.stage === 'archived' ? 'Archivado' : 'Candidato'}</p></div>
+              {m.stage === 'production' && <Star size={18} className="text-amber-500" aria-label="Modelo en producción"/>}
+            </div>
+            <p className="text-xs text-slate-600">{m.notes || 'Sin notas.'}</p>
+            <div className="grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+              <span>Test accuracy: <strong>{number(m.test_metrics.accuracy)}</strong></span>
+              <span>Épocas entrenadas: <strong>{m.epochs_trained ?? '—'}{run ? `/${run.epochs}` : ''}</strong></span>
+              <span>Mejor época: <strong>{m.best_epoch ?? '—'}</strong></span>
+              <span>Early Stopping: <strong>{m.early_stopped === null ? 'Sin datos' : m.early_stopped ? 'Activado y detenido' : 'No detuvo'}</strong></span>
+            </div>
+            <p className="break-all font-mono text-[11px] text-slate-500">SHA-256: {m.sha256}</p>
+            {editing === m.id ? <div className="space-y-2 border-t border-slate-200 pt-3">
+              <div><label className="field-label" htmlFor={`model-name-${m.id}`}>Nombre</label><input id={`model-name-${m.id}`} className="field" maxLength={100} value={modelName} onChange={e => setModelName(e.target.value)}/></div>
+              <div><label className="field-label" htmlFor={`model-notes-${m.id}`}>Notas</label><textarea id={`model-notes-${m.id}`} className="field" maxLength={500} rows={2} value={modelNotes} onChange={e => setModelNotes(e.target.value)}/></div>
+              <div><label className="field-label" htmlFor={`model-stage-${m.id}`}>Estado</label><select id={`model-stage-${m.id}`} className="field" value={modelStage} onChange={e => setModelStage(e.target.value as ModelStage)}>
+                <option value="candidate">Candidato</option><option value="production">Producción</option><option value="archived">Archivado</option>
+              </select></div>
+              <p className="text-xs text-slate-500">Solo un modelo puede estar en producción por proyecto. Promover otro despromueve al anterior.</p>
+              <div className="flex gap-2"><button className="btn-primary" disabled={saving || modelName.trim().length < 3} onClick={() => void saveMetadata(m.id)}><Save size={15}/> Guardar</button>
+              <button className="btn-outline" onClick={() => setEditing('')} disabled={saving}>Cancelar</button></div>
+            </div> : <button className="btn-outline" onClick={() => beginEdit(m)}><Pencil size={15}/> Administrar modelo</button>}
+          </article>;
+        })}
+      </div>
+    </section>
   </div>;
 }

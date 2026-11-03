@@ -21,3 +21,8 @@ jobs:
           TF_CPP_MIN_LOG_LEVEL: '2'
           OMP_NUM_THREADS: '2'
         run: python workers/training/smoke_test.py
+      - name: Verificar Early Stopping con Iris real
+        env:
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          OMP_NUM_THREADS: '2'
+        run: python workers/training/early_stopping_smoke.py

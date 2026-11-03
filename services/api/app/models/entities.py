@@ -80,6 +80,8 @@ class TrainingJob(Base):
     batch_size: Mapped[int] = mapped_column(Integer)
     learning_rate: Mapped[float] = mapped_column(Float)
     seed: Mapped[int] = mapped_column(Integer)
+    # Cero desactiva Early Stopping; las versiones anteriores quedan intactas.
+    early_stopping_patience: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     config_snapshot: Mapped[dict] = mapped_column(JSON)
     preparation_snapshot: Mapped[dict] = mapped_column(JSON)
     dataset_sha256: Mapped[str] = mapped_column(String(64))
@@ -116,4 +118,11 @@ class ModelVersion(Base):
     storage_key: Mapped[str] = mapped_column(String(240), unique=True)
     sha256: Mapped[str] = mapped_column(String(64))
     test_metrics: Mapped[dict] = mapped_column(JSON)
+    # Registro de modelos sin modificar ni volver a subir el artefacto .keras.
+    name: Mapped[str] = mapped_column(String(100), default="Modelo Keras", server_default="Modelo Keras")
+    stage: Mapped[str] = mapped_column(String(16), default="candidate", server_default="candidate")
+    notes: Mapped[str] = mapped_column(String(500), default="", server_default="")
+    best_epoch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    epochs_trained: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    early_stopped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)

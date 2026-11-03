@@ -231,6 +231,7 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
         architecture = dict(job.config_snapshot)
         expected_hash = job.dataset_sha256
         epochs, batch, lr, seed = job.epochs, job.batch_size, job.learning_rate, job.seed
+        early_patience = job.early_stopping_patience
         project_id = job.project_id
         token = job.worker_token
         if token is None:
@@ -262,8 +263,15 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
                 self.model.stop_training = True
 
     try:
+        callbacks = [Progress()]
+        if early_patience > 0:
+            # Detiene épocas sin mejora y recupera pesos de la mejor validación.
+            # No consulta el conjunto test para seleccionar pesos.
+            callbacks.append(tf.keras.callbacks.EarlyStopping(
+                monitor="val_loss", patience=early_patience,
+                restore_best_weights=True))
         model.fit(train_x, train_y, validation_data=(valid_x, valid_y),
-                  epochs=epochs, batch_size=batch, verbose=0, callbacks=[Progress()])
+                  epochs=epochs, batch_size=batch, verbose=0, callbacks=callbacks)
         if cancelled(db_url, job_id, token):
             finish(db_url, job_id, "CANCELLED", token=token)
             return
@@ -286,8 +294,14 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
                 # Si el lease caducó durante el upload, no registrar el modelo.
                 # El objeto huérfano se puede eliminar en una tarea de mantenimiento.
                 raise RuntimeError("El entrenamiento perdió el control antes de guardar el modelo.")
+            recorded = db.scalars(select(TrainingMetric).where(
+                TrainingMetric.job_id == job_id).order_by(TrainingMetric.epoch)).all()
+            best_epoch = min(recorded, key=lambda row: row.val_loss).epoch if recorded else None
             db.add(ModelVersion(job_id=job_id, project_id=project_id,
-                storage_key=key, sha256=hashlib.sha256(data).hexdigest(), test_metrics=metrics))
+                storage_key=key, sha256=hashlib.sha256(data).hexdigest(), test_metrics=metrics,
+                name=f"Feedforward · {job_id.hex[:8]}", stage="candidate", notes="",
+                best_epoch=best_epoch, epochs_trained=len(recorded),
+                early_stopped=(early_patience > 0 and len(recorded) < epochs)))
             job.status = "COMPLETED"
             job.progress = 100
             job.ended_at = datetime.now(timezone.utc)

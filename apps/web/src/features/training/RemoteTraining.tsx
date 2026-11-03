@@ -34,6 +34,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [batchSize, setBatchSize] = useState(32);
   const [rate, setRate] = useState(0.001);
   const [seed, setSeed] = useState(42);
+  const [earlyStop, setEarlyStop] = useState(true);
+  const [patience, setPatience] = useState(3);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -176,9 +178,19 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
             ['Épocas', epochs, setEpochs, 1, 40, 'epochs-server'], ['Batch size', batchSize, setBatchSize, 1, 256, 'batch-server'],
             ['Learning rate', rate, setRate, 0.000001, 0.1, 'lr-server'], ['Semilla', seed, setSeed, 0, 2147483647, 'seed-server'],
           ] as const).map(([label, value, setter, min, max, id]) => <div key={id}><label className="field-label" htmlFor={id}>{label}</label><input id={id} type="number" min={min} max={max} step={id === 'lr-server' ? 0.0001 : 1} className="field" value={value} onChange={e => setter(Number(e.target.value))}/></div>)}</div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+            <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <input type="checkbox" checked={earlyStop} onChange={e => setEarlyStop(e.target.checked)}/>
+              Early Stopping (validación)
+            </label>
+            <p className="text-xs text-slate-500">Detener si no mejora val loss; recuperar los mejores pesos. El test permanece independiente.</p>
+            {earlyStop && <div><label className="field-label" htmlFor="early-patience">Paciencia · épocas</label>
+              <input className="field max-w-28" id="early-patience" type="number" min={1} max={10}
+                value={patience} onChange={e => setPatience(Number(e.target.value))}/></div>}
+          </div>
           {!prepared.length && <Notice tone="warning">Prepara primero un CSV remoto desde M05 → Servidor.</Notice>}
           <button className="btn-primary w-full" disabled={busy || !datasetId || !architectureId || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
-            const item = await startJob(projectId, await token(), { architecture_id: architectureId, dataset_id: datasetId, epochs, batch_size: batchSize, learning_rate: rate, seed });
+            const item = await startJob(projectId, await token(), { architecture_id: architectureId, dataset_id: datasetId, epochs, batch_size: batchSize, learning_rate: rate, seed, early_stopping_patience: earlyStop ? patience : 0 });
             await refresh(projectId); setJobId(item.id); setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
           })}>{busy ? <Loader2 size={17} className="animate-spin"/> : <Plus size={17}/>} Encolar entrenamiento</button>
         </section>
