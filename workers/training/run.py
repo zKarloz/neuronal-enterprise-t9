@@ -23,6 +23,7 @@ def main():
     url = settings().database_url
     if not url:
         parser.error("DATABASE_URL no está configurada en services/api/.env")
+    logging.info("Worker v0.7 iniciado. Consultando la cola cada cinco segundos.")
     while True:
         did_work = run_once(url)
         if args.once:

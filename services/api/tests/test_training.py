@@ -196,3 +196,80 @@ def test_running_cancel_is_cooperative(lab):
     assert response.status_code == 200
     assert response.json()["status"] == "RUNNING"  # El worker confirma el final.
     assert response.json()["cancel_requested"] is True
+
+# V0.7: streams autenticados, reintento explícito y fencing de trabajos abandonados.
+def test_retry_keeps_history_and_snapshots(lab):
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    original = submit(client, pid, aid, did).json()
+    url = f"/api/v1/projects/{pid}/training-jobs/{original['id']}"
+    assert client.post(f"{url}/retry").status_code == 409  # No reintentar un trabajo activo.
+    assert client.post(f"{url}/cancel").status_code == 200
+    response = client.post(f"{url}/retry")
+    assert response.status_code == 202, response.text
+    retry = response.json()
+    assert retry["retry_of_job_id"] == original["id"]
+    assert retry["id"] != original["id"] and retry["status"] == "QUEUED"
+    with Session(eng) as db:
+        old = db.get(TrainingJob, UUID(original["id"]))
+        new = db.get(TrainingJob, UUID(retry["id"]))
+        assert old.status == "CANCELLED"
+        assert new.preparation_snapshot == old.preparation_snapshot
+        assert new.config_snapshot == old.config_snapshot
+        assert new.dataset_sha256 == old.dataset_sha256
+    assert client.post(f"{url}/retry").status_code == 409  # Un solo job activo.
+
+
+def test_recovery_invalidates_late_worker_and_allows_retry(lab, monkeypatch):
+    from datetime import timedelta, datetime, timezone
+    from workers.training import engine as worker
+    client, eng, _ = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    monkeypatch.setattr(worker, "engine", lambda _url: eng)
+    with Session(eng) as db:
+        job_id = worker.claim(db)
+        assert job_id == UUID(job["id"])
+        token = db.get(TrainingJob, job_id).worker_token
+        assert token
+        assert worker.recover_stale(db) == 0  # Un worker vivo no se interrumpe.
+        old = db.get(TrainingJob, job_id)
+        old.status = "RUNNING"
+        old.heartbeat_at = datetime.now(timezone.utc) - timedelta(minutes=15)
+        db.commit()
+        assert worker.recover_stale(db) == 1
+        db.refresh(old)
+        assert old.status == "FAILED" and old.worker_token is None
+    with pytest.raises(ValueError):
+        worker.record_epoch("test", job_id, 1, {"loss": 0.4, "val_loss": 0.5}, 3, token=token)
+    worker.finish("test", job_id, "COMPLETED", token=token)
+    with Session(eng) as db:
+        assert db.get(TrainingJob, job_id).status == "FAILED"
+    retry = client.post(f"/api/v1/projects/{pid}/training-jobs/{job_id}/retry")
+    assert retry.status_code == 202 and retry.json()["retry_of_job_id"] == str(job_id)
+
+
+def test_sse_emits_real_snapshot_and_rejects_other_users(lab):
+    import json
+    client, eng, state = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    job_id = UUID(job["id"])
+    with Session(eng) as db:
+        record = db.get(TrainingJob, job_id)
+        record.status = "FAILED"  # Finaliza para que el SSE sea de una sola respuesta.
+        record.error_message = "Prueba de evento terminal."
+        db.commit()
+    url = f"/api/v1/projects/{pid}/training-jobs/{job_id}/events"
+    response = client.get(url)
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
+    assert "event: snapshot" in response.text
+    line = next(line[6:] for line in response.text.splitlines() if line.startswith("data: "))
+    event = json.loads(line)
+    assert event["job"]["status"] == "FAILED"
+    assert event["job"]["id"] == str(job_id)
+    assert event["metrics"] == [] and event["model"] is None
+    assert "worker_token" not in line  # No revelar fencing ni credenciales.
+    state["identity"] = Identity(uuid4(), "intruder@example.org")
+    assert client.get(url).status_code == 404
+    assert client.post(f"/api/v1/projects/{pid}/training-jobs/{job_id}/retry").status_code == 404

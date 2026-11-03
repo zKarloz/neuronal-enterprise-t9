@@ -1,15 +1,14 @@
-# NeuroLab Enterprise v0.6.0
+# NeuroLab Enterprise v0.7.0
 
-Plataforma modular React/TypeScript + FastAPI + PostgreSQL/Supabase para redes neuronales. Conserva los diez módulos y los motores locales de TensorFlow.js.
+Plataforma modular React/TypeScript/Tailwind + FastAPI + PostgreSQL/Supabase para redes neuronales. Se conservan los diez módulos, los motores locales de TensorFlow.js, los datasets CSV remotos y el worker TensorFlow/Keras independiente.
 
-La nueva etapa incorpora arquitecturas Feedforward inmutables, trabajos persistentes, entrenamiento Keras en worker local y CI con GitHub Actions.
+**Nuevo en v0.7.0:** monitor autenticado SSE en M06 con respaldo REST, heartbeat y detección de trabajos abandonados, reintentos explícitos conservando el historial, y evaluación de ejecuciones remotas en M07.
 
-**El entrenamiento remoto completo requiere validar la migración, un worker real con TensorFlow y Supabase Storage; las pruebas de API no sustituyen esa verificación.**
+- Frontend Vercel: `apps/web/`.
+- API FastAPI Render: `services/api/`.
+- Worker local Python 3.12: `workers/training/`.
+- PostgreSQL y buckets privados en Supabase.
+- Migración requerida antes del despliegue: `004_live_recovery`.
+- Guía de operaciones: `docs/operations/TIEMPO_REAL_RECUPERACION_V070.md`.
 
-- Interfaz: `apps/web/` (Vercel).
-- API: `services/api/` (Render).
-- Worker: `workers/training/` (equipo local, Python 3.12).
-- Base: Supabase PostgreSQL.
-- Almacenamiento: buckets privados `neurolab-datasets` y `neurolab-models`.
-- Instrucciones: `docs/operations/ENTRENAMIENTO_REMOTO_V060.md`.
-- Estado de implementación: `docs/ESTADO_NEUROLAB_V060.md`.
+El entrenamiento sigue requiriendo un worker encendido. La recuperación no reanuda un checkpoint Keras; los trabajos abandonados pasan a FAILED y se pueden reintentar desde cero.

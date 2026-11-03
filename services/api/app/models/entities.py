@@ -84,6 +84,11 @@ class TrainingJob(Base):
     preparation_snapshot: Mapped[dict] = mapped_column(JSON)
     dataset_sha256: Mapped[str] = mapped_column(String(64))
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # V0.7: el token protege frente a escrituras tardías de un worker abandonado.
+    worker_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Un reintento es un nuevo trabajo; el original conserva métricas y estado.
+    retry_of_job_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("training_jobs.id"), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

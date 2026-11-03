@@ -12,12 +12,14 @@ import io
 import logging
 import math
 import tempfile
-from datetime import datetime, timezone
+import threading
+from contextlib import contextmanager
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.core.database import engine
@@ -40,9 +42,81 @@ def claim(session: Session) -> UUID | None:
         return None
     job.status = "PREPARING"
     job.started_at = datetime.now(timezone.utc)
+    job.heartbeat_at = job.started_at
+    job.worker_token = str(uuid4())
     session.commit()
     return job.id
 
+
+
+def recover_stale(session: Session, timeout_minutes: int = 10) -> int:
+    """Marca como FAILED los trabajos sin heartbeat, nunca los reencola.
+
+    Sin checkpoint del optimizador no podemos reanudar una época con fidelidad.
+    Un reintento explícito crea otra ejecución, preservando el registro anterior.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+    query = select(TrainingJob).where(
+        TrainingJob.status.in_(("PREPARING", "RUNNING")),
+    )
+    if session.bind.dialect.name == "postgresql":
+        query = query.with_for_update(skip_locked=True)
+    count = 0
+    for job in session.scalars(query).all():
+        last_seen = job.heartbeat_at or job.started_at
+        if last_seen is None:
+            last_seen = job.created_at
+        # SQLite puede devolver fechas sin tz; normalizamos al compararlas.
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if last_seen >= cutoff:
+            continue
+        job.status = "FAILED"
+        job.ended_at = datetime.now(timezone.utc)
+        job.error_message = "El worker dejó de enviar señales. Puedes reintentar el entrenamiento."
+        job.worker_token = None  # Invalida las escrituras del proceso anterior.
+        count += 1
+    if count:
+        session.commit()
+        LOGGER.warning("Se marcaron %d trabajos abandonados como FAILED", count)
+    return count
+
+
+@contextmanager
+def lease_heartbeat(db_url: str, job_id: UUID, token: str, interval_seconds: int = 10):
+    """Heartbeat separado incluso durante épocas largas, guardado de modelos o I/O."""
+    stop = threading.Event()
+
+    def pulse():
+        while not stop.wait(interval_seconds):
+            try:
+                with Session(engine(db_url)) as db:
+                    updated = db.execute(update(TrainingJob).where(
+                        TrainingJob.id == job_id,
+                        TrainingJob.worker_token == token,
+                        TrainingJob.status.in_(("PREPARING", "RUNNING")),
+                    ).values(heartbeat_at=datetime.now(timezone.utc))).rowcount
+                    db.commit()
+                if updated != 1:
+                    return  # Un job finalizado o recuperado no mantiene la sesión.
+            except Exception:
+                LOGGER.exception("No se pudo actualizar el heartbeat de %s", job_id)
+                # El watchdog detectará el abandono si no se recupera la conexión.
+    thread = threading.Thread(target=pulse, name=f"heartbeat-{job_id}", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=3)
+
+
+def ensure_lease(db_url: str, job_id: UUID, token: str) -> None:
+    """Fencing: un proceso caducado jamás debe publicar un modelo como válido."""
+    with Session(engine(db_url)) as db:
+        job = db.get(TrainingJob, job_id)
+        if job is None or job.worker_token != token or job.status not in ("PREPARING", "RUNNING"):
+            raise RuntimeError("El trabajo ya no pertenece a este worker.")
 
 def encode_partition(raw: bytes, prep: dict):
     """Reconstruye arrays SOLO con estadísticas de train guardadas en M05."""
@@ -102,16 +176,16 @@ def make_model(prep: dict, config: dict, rate: float, seed: int):
     return model
 
 
-def cancelled(db_url: str, job_id: UUID) -> bool:
+def cancelled(db_url: str, job_id: UUID, token: str | None = None) -> bool:
     with Session(engine(db_url)) as db:
         job = db.get(TrainingJob, job_id)
-        return job is None or job.cancel_requested or job.status == "CANCELLED"
+        return job is None or (token is not None and job.worker_token != token) or job.cancel_requested or job.status in ("FAILED", "CANCELLED")
 
 
-def finish(db_url: str, job_id: UUID, status: str, error: str | None = None):
+def finish(db_url: str, job_id: UUID, status: str, error: str | None = None, token: str | None = None):
     with Session(engine(db_url)) as db:
         job = db.get(TrainingJob, job_id)
-        if job:
+        if job and job.status in ("PREPARING", "RUNNING") and (token is None or job.worker_token == token):
             job.status = status
             job.ended_at = datetime.now(timezone.utc)
             job.error_message = error
@@ -120,7 +194,7 @@ def finish(db_url: str, job_id: UUID, status: str, error: str | None = None):
             db.commit()
 
 
-def record_epoch(db_url: str, job_id: UUID, epoch: int, logs: dict, total_epochs: int):
+def record_epoch(db_url: str, job_id: UUID, epoch: int, logs: dict, total_epochs: int, token: str | None = None):
     """Persistir los valores reales de Keras inmediatamente después de cada época."""
     values = {name: logs.get(name) for name in ("loss", "val_loss", "accuracy", "val_accuracy")}
     if values["loss"] is None or values["val_loss"] is None:
@@ -129,14 +203,15 @@ def record_epoch(db_url: str, job_id: UUID, epoch: int, logs: dict, total_epochs
         raise ValueError("El entrenamiento produjo métricas no finitas.")
     with Session(engine(db_url)) as db:
         job = db.get(TrainingJob, job_id)
-        if not job or job.status != "RUNNING":
-            raise ValueError("El trabajo no está en ejecución.")
+        if not job or job.status != "RUNNING" or (token is not None and job.worker_token != token):
+            raise ValueError("El trabajo no está en ejecución o se perdió el control de la sesión.")
         db.add(TrainingMetric(job_id=job_id, epoch=epoch,
                               loss=float(values["loss"]), val_loss=float(values["val_loss"]),
                               accuracy=float(values["accuracy"]) if values["accuracy"] is not None else None,
                               val_accuracy=float(values["val_accuracy"]) if values["val_accuracy"] is not None else None))
         job.epoch = epoch
         job.progress = round(epoch * 100 / total_epochs)
+        job.heartbeat_at = datetime.now(timezone.utc)
         db.commit()
 
 
@@ -157,8 +232,11 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
         expected_hash = job.dataset_sha256
         epochs, batch, lr, seed = job.epochs, job.batch_size, job.learning_rate, job.seed
         project_id = job.project_id
-    if cancelled(db_url, job_id):
-        finish(db_url, job_id, "CANCELLED")
+        token = job.worker_token
+        if token is None:
+            raise RuntimeError("El trabajo no tiene una sesión de worker válida.")
+    if cancelled(db_url, job_id, token):
+        finish(db_url, job_id, "CANCELLED", token=token)
         return
     raw = asyncio.run(storage.read(storage_key))
     if hashlib.sha256(raw).hexdigest() != expected_hash:
@@ -167,6 +245,8 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
     model = make_model(snapshot, architecture, lr, seed)
     with Session(engine(db_url)) as db:
         job = db.get(TrainingJob, job_id)
+        if job is None or job.worker_token != token or job.status != "PREPARING":
+            raise RuntimeError("El worker perdió el control durante la preparación.")
         if job.cancel_requested:
             job.status = "CANCELLED"
             job.ended_at = datetime.now(timezone.utc)
@@ -177,15 +257,15 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
 
     class Progress(tf.keras.callbacks.Callback):
         def on_epoch_end(self, epoch, logs=None):
-            record_epoch(db_url, job_id, epoch + 1, logs or {}, epochs)
-            if cancelled(db_url, job_id):
+            record_epoch(db_url, job_id, epoch + 1, logs or {}, epochs, token=token)
+            if cancelled(db_url, job_id, token):
                 self.model.stop_training = True
 
     try:
         model.fit(train_x, train_y, validation_data=(valid_x, valid_y),
                   epochs=epochs, batch_size=batch, verbose=0, callbacks=[Progress()])
-        if cancelled(db_url, job_id):
-            finish(db_url, job_id, "CANCELLED")
+        if cancelled(db_url, job_id, token):
+            finish(db_url, job_id, "CANCELLED", token=token)
             return
         evaluation = model.evaluate(test_x, test_y, verbose=0, return_dict=True)
         metrics = {key: float(value) for key, value in evaluation.items()}
@@ -195,11 +275,17 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
             path = Path(folder) / "model.keras"
             model.save(path)
             data = path.read_bytes()
+        # El lease se comprueba antes y después de subir el artefacto privado.
+        ensure_lease(db_url, job_id, token)
         key = f"{project_id}/{job_id}.keras"
         asyncio.run(storage.upload_model(key, data))
         # No sobrescribir versiones anteriores; una fila por trabajo.
         with Session(engine(db_url)) as db:
             job = db.get(TrainingJob, job_id)
+            if job is None or job.status != "RUNNING" or job.worker_token != token:
+                # Si el lease caducó durante el upload, no registrar el modelo.
+                # El objeto huérfano se puede eliminar en una tarea de mantenimiento.
+                raise RuntimeError("El entrenamiento perdió el control antes de guardar el modelo.")
             db.add(ModelVersion(job_id=job_id, project_id=project_id,
                 storage_key=key, sha256=hashlib.sha256(data).hexdigest(), test_metrics=metrics))
             job.status = "COMPLETED"
@@ -213,13 +299,18 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
 def run_once(db_url: str, storage: PrivateStorage | None = None) -> bool:
     """Devuelve False si no había trabajo disponible; no oculta fallos operativos."""
     with Session(engine(db_url)) as db:
+        recover_stale(db)
         job_id = claim(db)
+        token = db.get(TrainingJob, job_id).worker_token if job_id else None
     if job_id is None:
         return False
+    LOGGER.info("Se reclamó el trabajo %s; iniciando TensorFlow/Keras", job_id)
     try:
-        train_one(db_url, job_id, storage)
+        with lease_heartbeat(db_url, job_id, token):
+            train_one(db_url, job_id, storage)
+        LOGGER.info("Procesamiento finalizado para el trabajo %s", job_id)
     except Exception:
         # No filtrar SQL ni credenciales a la interfaz. El detalle técnico va a los logs privados.
         LOGGER.exception("Falló el trabajo %s", job_id)
-        finish(db_url, job_id, "FAILED", "El worker no pudo completar el entrenamiento. Revisa sus logs privados.")
+        finish(db_url, job_id, "FAILED", "El worker no pudo completar el entrenamiento. Revisa sus logs privados.", token=token)
     return True

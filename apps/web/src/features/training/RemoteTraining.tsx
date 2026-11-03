@@ -1,12 +1,12 @@
 /** M06 remoto: trabajos persistentes de FastAPI con seguimiento REST, sin valores simulados. */
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Ban, BrainCircuit, CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Activity, Ban, BrainCircuit, CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession } from '../../lib/api/session';
 import { type RemoteDataset } from '../../lib/api/datasets';
 import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
-  type DenseLayer, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
+  retryJob, watchJobEvents, type DenseLayer, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
 import { EmptyState, Heading, Notice } from '../../components/ui';
 import type { Page } from '../../app/App';
 
@@ -37,6 +37,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [transport, setTransport] = useState<'connecting' | 'live' | 'rest' | 'done'>('connecting');
   const selectedJob = jobs.find(job => job.id === jobId);
   const prepared = datasets.filter(item => item.prep_json !== null);
 
@@ -73,15 +74,52 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     void refresh(projectId).catch(err => setError(err instanceof Error ? err.message : 'Error de conexión.'));
   }, [projectId, refresh]);
 
-  // REST es fuente de verdad; polling solo mientras el usuario observa esta vista.
+  // SSE acelera el monitor. REST sigue disponible si una red/proxy corta el stream.
+  useEffect(() => {
+    if (!projectId || !jobId) return;
+    const controller = new AbortController();
+    let active = true;
+    let finished = false;
+    setTransport('connecting');
+    const stream = async () => {
+      while (active && !finished) {
+        try {
+          const access = await token();
+          if (!active) break;
+          await watchJobEvents(projectId, access, jobId, controller.signal, snapshot => {
+            if (!active || snapshot.job.id !== jobId) return;
+            setTransport('live');
+            setJobs(current => current.map(item => item.id === jobId ? snapshot.job : item));
+            setMetrics(snapshot.metrics);
+            if (snapshot.model) setModels(current => current.some(item => item.id === snapshot.model!.id)
+              ? current : [snapshot.model!, ...current]);
+            if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(snapshot.job.status)) {
+              finished = true;
+              setTransport('done');
+            }
+          });
+          if (finished || !active) break;
+        } catch {
+          if (!active) break;
+          setTransport('rest');
+        }
+        // Reconectar el stream finito; el polling REST continúa como respaldo.
+        if (active && !finished) await new Promise(resolve => window.setTimeout(resolve, 12000));
+      }
+    };
+    void stream();
+    return () => { active = false; controller.abort(); };
+  }, [projectId, jobId, token]);
+
+  // REST es la fuente de verdad y también refresca listas de otros trabajos.
   useEffect(() => {
     if (!projectId) return;
     let active = true;
     const interval = window.setInterval(() => {
       void refresh(projectId).catch(err => { if (active) setError(err instanceof Error ? err.message : 'Error al actualizar.'); });
-    }, 8000);
+    }, transport === 'live' ? 30000 : 8000);
     return () => { active = false; window.clearInterval(interval); };
-  }, [projectId, refresh]);
+  }, [projectId, refresh, transport]);
   useEffect(() => {
     if (!projectId || !jobId) { setMetrics([]); return; }
     let active = true;
@@ -146,14 +184,25 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
         </section>
       </div>
       <section className="panel p-5 space-y-4">
-        <h2 className="text-base font-bold text-ink">Monitor de trabajos persistidos</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-bold text-ink">Monitor de trabajos persistidos</h2>
+          <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600" role="status">
+            {transport === 'live' ? 'SSE · en vivo' : transport === 'done' ? 'Resultado persistido' : transport === 'connecting' ? 'Conectando SSE…' : 'REST · respaldo'}
+          </span>
+        </div>
         <label className="field-label" htmlFor="remote-job-monitor">Selecciona una ejecución</label>
         <select id="remote-job-monitor" className="field" value={jobId} onChange={e => setJobId(e.target.value)}><option value="">Sin ejecuciones</option>{jobs.map(job => <option key={job.id} value={job.id}>{new Date(job.created_at).toLocaleString()} · {STATES[job.status]} · {job.epoch}/{job.epochs}</option>)}</select>
         {selectedJob ? <>
           <div className="flex flex-wrap items-center justify-between gap-3"><div><strong className="text-sm text-ink">{STATES[selectedJob.status]}</strong><p className="text-xs text-slate-500">Época {selectedJob.epoch} de {selectedJob.epochs}{selectedJob.cancel_requested ? ' · Cancelación solicitada' : ''}</p></div>
+            {['FAILED', 'CANCELLED'].includes(selectedJob.status) && <button className="btn-outline" disabled={busy || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
+              const job = await retryJob(projectId, await token(), selectedJob.id);
+              await refresh(projectId); setJobId(job.id);
+              setNotice('Reintento creado como nueva ejecución. El historial anterior permanece disponible.');
+            })}><RotateCcw size={16}/> Reintentar trabajo</button>}
             {['QUEUED', 'PREPARING', 'RUNNING'].includes(selectedJob.status) && <button className="btn-outline" disabled={busy || selectedJob.cancel_requested} onClick={() => void action(async () => { await cancelJob(projectId, await token(), selectedJob.id); await refresh(projectId); })}><Ban size={16}/> Solicitar cancelación</button>}</div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-primary-500 transition-all" style={{ width: `${selectedJob.progress}%` }}/></div>
           <p className="text-xs text-slate-500">Progreso: {selectedJob.progress}% · {selectedJob.status === 'QUEUED' ? 'Esperando worker' : 'Estado guardado en PostgreSQL'}</p>
+          {selectedJob.retry_of_job_id && <p className="text-xs text-slate-500">Reintento de la ejecución {selectedJob.retry_of_job_id.slice(0, 8)}…</p>}
           {selectedJob.error_message && <Notice tone="error">{selectedJob.error_message}</Notice>}
           {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{metric(m.accuracy)}</td><td className="px-3 py-2">{metric(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
           {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}

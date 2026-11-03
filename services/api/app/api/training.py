@@ -4,9 +4,13 @@ Los entrenamientos nunca se ejecutan en el proceso HTTP. El worker reclama
 trabajos desde PostgreSQL. El usuario ve solo recursos de sus proyectos.
 """
 from datetime import datetime, timezone
+import asyncio
+import json
+import time
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -77,6 +81,8 @@ class JobView(BaseModel):
     created_at: datetime
     started_at: datetime | None
     ended_at: datetime | None
+    heartbeat_at: datetime | None
+    retry_of_job_id: UUID | None
 
 
 class MetricView(BaseModel):
@@ -210,6 +216,96 @@ def cancel_job(project_id: UUID, job_id: UUID, identity: Identity = Depends(curr
     db.refresh(job)
     return job
 
+
+
+@router.post("/training-jobs/{job_id}/retry", status_code=202, response_model=JobView)
+def retry_job(project_id: UUID, job_id: UUID, identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
+    """Reintenta manualmente sin reescribir épocas ni artefactos anteriores."""
+    require_editor(db, project_id, identity)
+    if db.bind.dialect.name == "postgresql":
+        db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).first()
+    original = db.scalar(select(TrainingJob).where(
+        TrainingJob.id == job_id, TrainingJob.project_id == project_id))
+    if original is None:
+        raise HTTPException(404, "Trabajo no encontrado.")
+    if original.status not in ("FAILED", "CANCELLED"):
+        raise HTTPException(409, "Solo es posible reintentar trabajos fallidos o cancelados.")
+    active = db.scalar(select(TrainingJob.id).where(
+        TrainingJob.project_id == project_id, TrainingJob.status.in_(ACTIVELY_RUNNING)).limit(1))
+    if active:
+        raise HTTPException(409, "Ya existe otro entrenamiento activo en este proyecto.")
+    # Reutilizar el snapshot original garantiza un experimento reproducible.
+    # La eliminación de datasets asociados ya está bloqueada por su relación FK.
+    retry = TrainingJob(project_id=project_id, architecture_id=original.architecture_id,
+        dataset_id=original.dataset_id, epochs=original.epochs,
+        batch_size=original.batch_size, learning_rate=original.learning_rate,
+        seed=original.seed, status="QUEUED",
+        config_snapshot=dict(original.config_snapshot),
+        preparation_snapshot=dict(original.preparation_snapshot),
+        dataset_sha256=original.dataset_sha256, retry_of_job_id=original.id)
+    db.add(retry)
+    db.flush()
+    db.add(AuditEvent(actor_id=identity.id, project_id=project_id, action="training.retried"))
+    db.commit()
+    db.refresh(retry)
+    return retry
+
+
+def _job_snapshot(bind, project_id: UUID, job_id: UUID) -> dict | None:
+    """Cada consulta SSE usa una sesión breve y no retiene una conexión SQL abierta."""
+    with Session(bind) as session:
+        job = session.scalar(select(TrainingJob).where(
+            TrainingJob.id == job_id, TrainingJob.project_id == project_id))
+        if job is None:
+            return None
+        rows = session.scalars(select(TrainingMetric).where(
+            TrainingMetric.job_id == job_id).order_by(TrainingMetric.epoch)).all()
+        model = session.scalar(select(ModelVersion).where(ModelVersion.job_id == job_id))
+        return {
+            "job": JobView.model_validate(job).model_dump(mode="json"),
+            "metrics": [MetricView.model_validate(row).model_dump(mode="json") for row in rows],
+            "model": ModelView.model_validate(model).model_dump(mode="json") if model else None,
+        }
+
+
+@router.get("/training-jobs/{job_id}/events")
+async def job_events(project_id: UUID, job_id: UUID, request: Request,
+                     identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
+    """SSE por fetch con Bearer; no usar token en URL ni EventSource nativo.
+
+    El stream dura hasta 45 s en estado activo y el navegador reconecta;
+    cada conexión se autoriza antes de crear el stream.
+    """
+    get_job(project_id, job_id, identity, db)
+    bind = db.get_bind()
+    # Release la transacción utilizada para autorizar; el stream consulta con
+    # sesiones SQL breves en lugar de ocupar una conexión durante 45 segundos.
+    db.rollback()
+
+    async def events():
+        previous = None
+        start = time.monotonic()
+        next_ping = start + 12
+        while time.monotonic() - start < 45:
+            if await request.is_disconnected():
+                return
+            current = await asyncio.to_thread(_job_snapshot, bind, project_id, job_id)
+            if current is None:
+                return
+            payload = json.dumps(current, ensure_ascii=False, separators=(",", ":"))
+            if payload != previous:
+                yield f"event: snapshot\ndata: {payload}\n\n"
+                previous = payload
+            if current["job"]["status"] in ("COMPLETED", "FAILED", "CANCELLED"):
+                return
+            if time.monotonic() >= next_ping:
+                yield ": heartbeat\n\n"
+                next_ping = time.monotonic() + 12
+            await asyncio.sleep(2)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+    })
 
 @router.get("/models", response_model=list[ModelView])
 def list_models(project_id: UUID, identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
