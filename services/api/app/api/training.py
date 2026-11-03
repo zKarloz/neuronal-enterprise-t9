@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -61,6 +62,7 @@ class JobInput(BaseModel):
     batch_size: int = Field(default=32, ge=1, le=256)
     learning_rate: float = Field(default=0.001, gt=0, le=0.1)
     seed: int = Field(default=42, ge=0, le=2_147_483_647)
+    early_stopping_patience: int = Field(default=0, ge=0, le=10)
 
 
 class JobView(BaseModel):
@@ -76,6 +78,7 @@ class JobView(BaseModel):
     batch_size: int
     learning_rate: float
     seed: int
+    early_stopping_patience: int
     cancel_requested: bool
     error_message: str | None
     created_at: datetime
@@ -101,6 +104,12 @@ class ModelView(BaseModel):
     project_id: UUID
     sha256: str
     test_metrics: dict
+    name: str
+    stage: str
+    notes: str
+    best_epoch: int | None
+    epochs_trained: int | None
+    early_stopped: bool | None
     created_at: datetime
     # No revelar storage_key de los artefactos privados.
 
@@ -170,7 +179,8 @@ def enqueue_job(project_id: UUID, payload: JobInput,
         raise HTTPException(409, "Ya existe un entrenamiento activo en este proyecto.")
     record = TrainingJob(project_id=project_id, architecture_id=architecture.id,
         dataset_id=dataset.id, epochs=payload.epochs, batch_size=payload.batch_size,
-        learning_rate=payload.learning_rate, seed=payload.seed, status="QUEUED",
+        learning_rate=payload.learning_rate, seed=payload.seed,
+        early_stopping_patience=payload.early_stopping_patience, status="QUEUED",
         config_snapshot=dict(architecture.config_json), preparation_snapshot=dict(dataset.prep_json),
         dataset_sha256=dataset.sha256)
     db.add(record)
@@ -239,7 +249,7 @@ def retry_job(project_id: UUID, job_id: UUID, identity: Identity = Depends(curre
     retry = TrainingJob(project_id=project_id, architecture_id=original.architecture_id,
         dataset_id=original.dataset_id, epochs=original.epochs,
         batch_size=original.batch_size, learning_rate=original.learning_rate,
-        seed=original.seed, status="QUEUED",
+        seed=original.seed, early_stopping_patience=original.early_stopping_patience, status="QUEUED",
         config_snapshot=dict(original.config_snapshot),
         preparation_snapshot=dict(original.preparation_snapshot),
         dataset_sha256=original.dataset_sha256, retry_of_job_id=original.id)
@@ -312,3 +322,50 @@ def list_models(project_id: UUID, identity: Identity = Depends(current_user), db
     one(db, project_id, identity)
     return db.scalars(select(ModelVersion).where(ModelVersion.project_id == project_id)
                       .order_by(ModelVersion.created_at.desc())).all()
+
+
+class ModelUpdate(BaseModel):
+    """Solo metadatos; no se altera el binario, SHA-256 o resultados del test."""
+    name: str | None = Field(default=None, min_length=3, max_length=100)
+    notes: str | None = Field(default=None, max_length=500)
+    stage: Literal["candidate", "production", "archived"] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str | None):
+        if value is not None:
+            value = value.strip()
+            if len(value) < 3:
+                raise ValueError("El nombre debe tener al menos 3 caracteres.")
+        return value
+
+
+@router.patch("/models/{model_id}", response_model=ModelView)
+def update_model(project_id: UUID, model_id: UUID, payload: ModelUpdate,
+                 identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
+    """Registro privado: editor puede nombrar, anotar o promover un modelo."""
+    require_editor(db, project_id, identity)
+    if db.bind.dialect.name == "postgresql":
+        # Serializar promociones por proyecto, sin carreras entre solicitudes.
+        db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).first()
+    model = db.scalar(select(ModelVersion).where(
+        ModelVersion.id == model_id, ModelVersion.project_id == project_id))
+    if model is None:
+        raise HTTPException(404, "Modelo no encontrado.")
+    if payload.name is not None:
+        model.name = payload.name
+    if payload.notes is not None:
+        model.notes = payload.notes.strip()
+    if payload.stage is not None:
+        if payload.stage == "production":
+            # Promover uno automáticamente devuelve el anterior a candidato.
+            from sqlalchemy import update
+            db.execute(update(ModelVersion).where(
+                ModelVersion.project_id == project_id,
+                ModelVersion.id != model_id,
+                ModelVersion.stage == "production").values(stage="candidate"))
+        model.stage = payload.stage
+    db.add(AuditEvent(actor_id=identity.id, project_id=project_id, action="model.updated"))
+    db.commit()
+    db.refresh(model)
+    return model
