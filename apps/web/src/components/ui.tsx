@@ -1,6 +1,7 @@
 // Biblioteca de componentes compartidos de interfaz enterprise.
 import type { ReactNode } from 'react';
-import { ArrowRight, CircleAlert, Cloud, HardDrive, Inbox, X } from 'lucide-react';
+import { ArrowRight, Cloud, HardDrive, Inbox, X } from 'lucide-react';
+import { FloatingNotice, type ToastTone } from './ToastProvider';
 
 /** Componentes presentacionales comunes para mantener uniformidad visual. */
 export function Heading({ title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
@@ -34,9 +35,8 @@ export function EmptyState({ icon, title, description, action, compact = false }
     {action && <div className="mt-5">{action}</div>}
   </div>;
 }
-export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: 'info' | 'warning' | 'error' | 'success' }) {
-  const tones = { info: 'border-blue-100 bg-blue-50/80 text-blue-900', warning: 'border-amber-100 bg-amber-50 text-amber-900', error: 'border-red-100 bg-red-50 text-red-900', success: 'border-emerald-100 bg-emerald-50 text-emerald-900' };
-  return <div role="status" className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm leading-6 ${tones[tone]}`}><CircleAlert className="mt-0.5 shrink-0" size={17} /> <span>{children}</span></div>;
+export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: ToastTone }) {
+  return <FloatingNotice tone={tone}>{children}</FloatingNotice>;
 }
 export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -59,4 +59,4 @@ export function SectionTitle({ title, subtitle, action }: { title: string; subti
   return <div className="mb-4 flex items-start justify-between gap-4"><div><h2 className="text-base font-bold text-ink">{title}</h2>{subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}</div>{action}</div>;
 }
 export const formatDate = (iso: string) => new Date(iso).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-export const formatMetric = (n: number) => Number.isFinite(n) ? n.toLocaleString('es-PE', { maximumFractionDigits: 5 }) : '—';
+export { formatMetric, formatAccuracy } from '../lib/metrics-format';

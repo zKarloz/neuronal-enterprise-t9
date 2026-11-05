@@ -1,4 +1,4 @@
-# NeuroLab Enterprise v0.10.0 — Registro de modelos, reportes e interfaz unificada
+# NeuroLab Enterprise v0.10.1 — Registro de modelos, reportes e interfaz unificada
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
@@ -22,7 +22,7 @@ Lee `INSTRUCCIONES_PARCHE_V090.md` y `docs/operations/CNN_REMOTA_V090.md`.
 
 Consulta `INSTRUCCIONES_PARCHE_V091.md` y `docs/operations/CORS_AVISOS_NAVEGACION_V091.md`.
 
-## v0.10.0 — Artefactos M08, reportes M09 e interfaz coherente
+## v0.10.1 — Artefactos M08, reportes M09 e interfaz coherente
 
 - M08 permite gestionar modelos Keras remotos y descargarlos mediante FastAPI con autenticación, validación SHA-256 y registro de auditoría. El bucket se mantiene privado.
 - M09 puede elaborar fichas y reportes remotos en JSON, CSV y PDF con datos realmente persistidos, limitando el alcance para proteger recursos.

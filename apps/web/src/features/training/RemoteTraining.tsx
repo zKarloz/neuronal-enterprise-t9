@@ -1,13 +1,14 @@
 /** M06 remoto: trabajos persistentes de FastAPI con seguimiento REST, sin valores simulados. */
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, Ban, BrainCircuit, CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
+import { Activity, Ban, BrainCircuit, CheckCircle2, Cloud, Database, Loader2, Plus, RefreshCw, RotateCcw } from 'lucide-react';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
-import { ensureSession, loadSession } from '../../lib/api/session';
+import { ensureSession, loadSession, SESSION_CHANGED } from '../../lib/api/session';
 import { type RemoteDataset } from '../../lib/api/datasets';
 import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
   retryJob, watchJobEvents, type DenseLayer, type ArchitectureDraft, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
-import { EmptyState, Heading, Notice } from '../../components/ui';
+import { EmptyState, Heading, Notice, formatAccuracy } from '../../components/ui';
+import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import { MetricChart } from '../../components/MetricChart';
 import { hasAccuracyMetrics, mergeRemoteMetrics, toChartMetrics } from '../../lib/remote-metrics';
 import type { Page } from '../../app/App';
@@ -17,9 +18,15 @@ const STATES: Record<RemoteJob['status'], string> = {
   COMPLETED: 'Completado', FAILED: 'Fallido', CANCELLED: 'Cancelado',
 };
 const INIT_LAYERS: DenseLayer[] = [{ units: 32, activation: 'relu' }, { units: 16, activation: 'relu' }];
-const metric = (v: number | null) => v === null || !Number.isFinite(v) ? '—' : v.toFixed(5);
+const metric = (v: number | null) => v === null || !Number.isFinite(v) ? '—' : v.toFixed(3);
 
 export default function RemoteTraining({ navigate }: { navigate: (page: Page) => void }) {
+  const [session, setSession] = useState(() => loadSession());
+  useEffect(() => {
+    const sync = () => setSession(loadSession());
+    window.addEventListener(SESSION_CHANGED, sync);
+    return () => window.removeEventListener(SESSION_CHANGED, sync);
+  }, []);
   const [projects, setProjects] = useState<RemoteProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const [datasets, setDatasets] = useState<RemoteDataset[]>([]);
@@ -44,6 +51,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [earlyStop, setEarlyStop] = useState(true);
   const [patience, setPatience] = useState(3);
   const [busy, setBusy] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingData, setLoadingData] = useState(false);
   const [error, setError] = useState('');
   // Fallos recuperables de sincronización: no contradicen un trabajo ya completado.
   const [syncError, setSyncError] = useState('');
@@ -70,7 +79,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
 
   const token = useCallback(async () => {
     const session = loadSession();
-    if (!session) throw new Error('Inicia sesión con Google desde M02 → Servidor.');
+    if (!session) throw new Error('Inicia sesión con Google desde el topbar.');
     return (await ensureSession(session)).access_token;
   }, []);
 
@@ -90,17 +99,23 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
 
   useEffect(() => {
     let alive = true;
-    if (!configured || !loadSession()) return;
+    if (!configured || !session) { setProjects([]); setLoadingProjects(false); return; }
+    setLoadingProjects(true);
     void token().then(access => request<RemoteProject[]>('/projects', access)).then(rows => {
       if (alive) { setProjects(rows); setProjectId(rows[0]?.id ?? ''); setSyncError(''); }
-    }).catch(err => { if (alive) setSyncError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); });
+    }).catch(err => { if (alive) setSyncError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); })
+      .finally(() => { if (alive) setLoadingProjects(false); });
     return () => { alive = false; };
-  }, [token]);
+  }, [token, session?.access_token]);
   useEffect(() => {
     setDatasets([]); setArchitectures([]); setJobs([]); setMetricsByJob({}); setModels([]);
     setSyncError('');
-    if (!projectId) return;
-    void refresh(projectId).catch(err => setSyncError(err instanceof Error ? err.message : 'Error de conexión.'));
+    if (!projectId) { setLoadingData(false); return; }
+    let active = true;
+    setLoadingData(true);
+    void refresh(projectId).catch(err => { if (active) setSyncError(err instanceof Error ? err.message : 'Error de conexión.'); })
+      .finally(() => { if (active) setLoadingData(false); });
+    return () => { active = false; };
   }, [projectId, refresh]);
 
   // SSE acelera el monitor. REST sigue disponible si una red/proxy corta el stream.
@@ -175,9 +190,9 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const updateLayer = (index: number, change: Partial<DenseLayer>) =>
     setLayers(current => current.map((layer, i) => i === index ? { ...layer, ...change } : layer));
 
-  if (!configured) return <Notice tone="warning">Configura VITE_API_BASE_URL para habilitar M06 remoto.</Notice>;
-  if (!loadSession()) return <><Heading eyebrow="Laboratorio · M06" title="Entrenamientos del servidor"/>
-    <div className="panel p-6"><EmptyState icon={<ShieldCheck size={28}/>} title="Se requiere iniciar sesión" description="Entra con Google desde M02 → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div></>;
+  if (!configured) return <RemoteUnavailable/>;
+  if (!session) return <RemoteAuthRequired/>;
+  if (loadingProjects || loadingData) return <LoadingState label="Cargando entrenamientos y arquitecturas…"/>;
   return <div className="space-y-5">
     <Heading eyebrow="Experimentación · M06 · Servidor" title="Entrenamiento neuronal remoto"
       description="Redes Feedforward y CNN 8×8 versionadas. TensorFlow/Keras se ejecuta en un worker Python; SSE muestra las métricas reales."/>
@@ -193,7 +208,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
       <button className="btn-outline" disabled={busy || !projectId} onClick={() => void action(() => refresh(projectId))}><RefreshCw size={16}/> Actualizar</button>
       <span className="text-xs text-slate-500"><Cloud size={15} className="inline"/> API propia</span>
     </section>
-    {!projectId ? <div className="panel p-5"><EmptyState icon={<Database size={24}/>} title="Crea un proyecto remoto" description="Visita M02 → Servidor para continuar." action={<button className="btn-primary" onClick={() => navigate('projects')}>Ir a M02</button>}/></div> : <>
+    {!projectId ? <div className="panel p-5"><EmptyState icon={<Database size={24}/>} title="Crea un proyecto remoto" description="Crea primero un proyecto en Proyectos de IA → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div> : <>
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="panel p-5 space-y-4">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink"><BrainCircuit size={19}/> Arquitecturas neuronales</h2>
@@ -310,8 +325,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
                 : 'Esta ejecución no tiene épocas registradas.'}
             </div>}
           </section>
-          {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{metric(m.accuracy)}</td><td className="px-3 py-2">{metric(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
-          {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
+          {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{formatAccuracy(m.accuracy)}</td><td className="px-3 py-2">{formatAccuracy(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
+          {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${key.includes('accuracy') ? formatAccuracy(val) : metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
         </> : <EmptyState compact icon={<Activity size={25}/>} title="Sin entrenamientos" description="Crea una arquitectura y encola una ejecución real."/>}
       </section>
     </>}

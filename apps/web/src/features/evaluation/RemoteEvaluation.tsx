@@ -1,16 +1,23 @@
 /** M07 remoto: muestra únicamente métricas almacenadas por Keras en PostgreSQL. */
 import { useEffect, useState } from 'react';
-import { Activity, CheckCircle2, Cloud, RefreshCw, ShieldCheck, Tags, Save, Pencil, Star } from 'lucide-react';
+import { Activity, CheckCircle2, Cloud, RefreshCw, Tags, Save, Pencil, Star } from 'lucide-react';
 import { MetricChart } from '../../components/MetricChart';
-import { EmptyState, Heading, Notice } from '../../components/ui';
+import { EmptyState, Heading, Notice, formatAccuracy } from '../../components/ui';
+import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
-import { ensureSession, loadSession } from '../../lib/api/session';
+import { ensureSession, loadSession, SESSION_CHANGED } from '../../lib/api/session';
 import { getJobs, getMetrics, getModels, updateModel, type EpochMetric, type RemoteJob, type RemoteModel, type ModelStage } from '../../lib/api/training';
 
-const number = (v: number | undefined | null) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(5);
+const number = (v: number | undefined | null) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(3);
 
 export default function RemoteEvaluation() {
+  const [session, setSession] = useState(() => loadSession());
+  useEffect(() => {
+    const sync = () => setSession(loadSession());
+    window.addEventListener(SESSION_CHANGED, sync);
+    return () => window.removeEventListener(SESSION_CHANGED, sync);
+  }, []);
   const [projects, setProjects] = useState<RemoteProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const [jobs, setJobs] = useState<RemoteJob[]>([]);
@@ -21,6 +28,8 @@ export default function RemoteEvaluation() {
   const [comparison, setComparison] = useState<EpochMetric[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [editing, setEditing] = useState('');
   const [modelName, setModelName] = useState('');
   const [modelNotes, setModelNotes] = useState('');
@@ -40,7 +49,7 @@ export default function RemoteEvaluation() {
     setSaving(true); setError(''); setNotice('');
     try {
       const session = loadSession();
-      if (!session) throw new Error('Inicia sesión desde M02 → Servidor.');
+      if (!session) throw new Error('Inicia sesión con Google desde el topbar.');
       const token = (await ensureSession(session)).access_token;
       await updateModel(projectId, token, modelId, {name: modelName, notes: modelNotes, stage: modelStage});
       setModels(await getModels(projectId, token));
@@ -50,7 +59,8 @@ export default function RemoteEvaluation() {
   }
 
   useEffect(() => {
-    if (!configured || !loadSession()) return;
+    if (!configured || !session) { setProjects([]); setProjectId(''); setLoadingProjects(false); return; }
+    setLoadingProjects(true);
     let mounted = true;
     const load = async () => {
       try {
@@ -60,10 +70,11 @@ export default function RemoteEvaluation() {
         const rows = await request<RemoteProject[]>('/projects', access);
         if (mounted) { setProjects(rows); setProjectId(rows[0]?.id ?? ''); }
       } catch (err) { if (mounted) setError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); }
+      finally { if (mounted) setLoadingProjects(false); }
     };
     void load();
     return () => { mounted = false; };
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     let mounted = true;
@@ -73,7 +84,7 @@ export default function RemoteEvaluation() {
       setLoading(true); setError('');
       try {
         const session = loadSession();
-        if (!session) throw new Error('Inicia sesión desde M02 → Servidor.');
+        if (!session) throw new Error('Inicia sesión con Google desde el topbar.');
         const access = (await ensureSession(session)).access_token;
         const [runs, saved] = await Promise.all([getJobs(projectId, access), getModels(projectId, access)]);
         if (mounted) {
@@ -91,7 +102,8 @@ export default function RemoteEvaluation() {
   useEffect(() => {
     let mounted = true;
     setMetrics([]); setComparison([]);
-    if (!projectId) return;
+    if (!projectId) { setLoadingMetrics(false); return; }
+    setLoadingMetrics(true);
     const read = async () => {
       try {
         const session = loadSession();
@@ -103,6 +115,7 @@ export default function RemoteEvaluation() {
         ]);
         if (mounted) { setMetrics(a); setComparison(b); }
       } catch (err) { if (mounted) setError(err instanceof Error ? err.message : 'Error al cargar métricas.'); }
+      finally { if (mounted) setLoadingMetrics(false); }
     };
     void read();
     return () => { mounted = false; };
@@ -117,8 +130,9 @@ export default function RemoteEvaluation() {
   const chartMetrics = metrics.map(m => ({epoch: m.epoch, loss: m.loss, valLoss: m.val_loss,
     accuracy: m.accuracy ?? undefined, valAccuracy: m.val_accuracy ?? undefined}));
 
-  if (!configured) return <Notice tone="warning">Configura VITE_API_BASE_URL para utilizar M07 remoto.</Notice>;
-  if (!loadSession()) return <div className="panel p-5"><EmptyState icon={<ShieldCheck size={26}/>} title="Inicia sesión" description="Abre M02 → Servidor para consultar evaluaciones remotas."/></div>;
+  if (!configured) return <RemoteUnavailable/>;
+  if (!session) return <RemoteAuthRequired/>;
+  if (loadingProjects || loading || loadingMetrics) return <LoadingState label="Cargando evaluaciones y métricas remotas…"/>;
   return <div className="space-y-5">
     <Heading eyebrow="Análisis · M07 · Servidor" title="Evaluación de modelos Keras" description="Curvas de entrenamiento, validación y resultados de prueba guardados en PostgreSQL. Ninguna cifra es simulada."/>
     {error && <Notice tone="error">{error}</Notice>}
@@ -136,10 +150,10 @@ export default function RemoteEvaluation() {
         <div className="panel p-5"><p className="text-xs text-slate-500">Pérdida final de validación</p><p className="mt-2 text-xl font-mono font-bold text-ink">{number(metrics.at(-1)?.val_loss)}</p></div>
       </div>
       <section className="panel p-5"><h2 className="mb-3 text-base font-bold text-ink">Curvas de aprendizaje</h2><MetricChart metrics={chartMetrics} height={270}/></section>
-      {model && <section className="panel space-y-2 p-5"><h2 className="flex items-center gap-2 font-bold text-ink"><CheckCircle2 size={18} className="text-emerald-600"/> Evaluación sobre test independiente</h2><div className="flex flex-wrap gap-4">{Object.entries(model.test_metrics).map(([k,v]) => <div key={k}><p className="text-xs text-slate-500">{k}</p><p className="font-mono font-bold text-ink">{number(v)}</p></div>)}</div><p className="break-all text-xs text-slate-500">SHA-256 del modelo: {model.sha256}</p></section>}
+      {model && <section className="panel space-y-2 p-5"><h2 className="flex items-center gap-2 font-bold text-ink"><CheckCircle2 size={18} className="text-emerald-600"/> Evaluación sobre test independiente</h2><div className="flex flex-wrap gap-4">{Object.entries(model.test_metrics).map(([k,v]) => <div key={k}><p className="text-xs text-slate-500">{k}</p><p className="font-mono font-bold text-ink">{k.includes('accuracy') ? formatAccuracy(v) : number(v)}</p></div>)}</div><p className="break-all text-xs text-slate-500">SHA-256 del modelo: {model.sha256}</p></section>}
       {compared && <section className="panel space-y-3 p-5"><h2 className="font-bold text-ink">Comparación de ejecuciones</h2>{!comparable && <Notice tone="warning">Los trabajos utilizan datasets diferentes. Las métricas no son directamente comparables.</Notice>}
         <table className="w-full text-left text-sm"><thead><tr className="border-b text-slate-500"><th className="py-2">Métrica</th><th>Principal</th><th>Comparación</th></tr></thead><tbody>
-          {([['Épocas', metrics.length, comparison.length], ['Loss validación', number(metrics.at(-1)?.val_loss), number(comparison.at(-1)?.val_loss)], ['Test loss', number(model?.test_metrics.loss), number(compareModel?.test_metrics.loss)], ['Test accuracy', number(model?.test_metrics.accuracy), number(compareModel?.test_metrics.accuracy)]] as const).map(([label, a, b]) => <tr key={label} className="border-b border-slate-100"><td className="py-2 font-medium">{label}</td><td className="font-mono">{a}</td><td className="font-mono">{b}</td></tr>)}
+          {([['Épocas', metrics.length, comparison.length], ['Loss validación', number(metrics.at(-1)?.val_loss), number(comparison.at(-1)?.val_loss)], ['Test loss', number(model?.test_metrics.loss), number(compareModel?.test_metrics.loss)], ['Test accuracy', formatAccuracy(model?.test_metrics.accuracy), formatAccuracy(compareModel?.test_metrics.accuracy)]] as const).map(([label, a, b]) => <tr key={label} className="border-b border-slate-100"><td className="py-2 font-medium">{label}</td><td className="font-mono">{a}</td><td className="font-mono">{b}</td></tr>)}
         </tbody></table>
       </section>}
     </>}
@@ -160,7 +174,7 @@ export default function RemoteEvaluation() {
             </div>
             <p className="text-xs text-slate-600">{m.notes || 'Sin notas.'}</p>
             <div className="grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
-              <span>Test accuracy: <strong>{number(m.test_metrics.accuracy)}</strong></span>
+              <span>Test accuracy: <strong>{formatAccuracy(m.test_metrics.accuracy)}</strong></span>
               <span>Épocas entrenadas: <strong>{m.epochs_trained ?? '—'}{run ? `/${run.epochs}` : ''}</strong></span>
               <span>Mejor época: <strong>{m.best_epoch ?? '—'}</strong></span>
               <span>Early Stopping: <strong>{m.early_stopped === null ? 'Sin datos' : m.early_stopped ? 'Activado y detenido' : 'No detuvo'}</strong></span>

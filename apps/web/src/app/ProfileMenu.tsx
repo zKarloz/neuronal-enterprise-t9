@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, LoaderCircle, LogIn, LogOut, UserRound } from 'lucide-react';
 import { startGoogleOAuth } from '../lib/api/google-oauth';
+import { Notice } from '../components/ui';
 import { loadSession, logout, SESSION_CHANGED, type RemoteSession } from '../lib/api/session';
 
 export default function ProfileMenu() {
@@ -65,6 +66,6 @@ export default function ProfileMenu() {
         {busy ? <LoaderCircle size={16} className="animate-spin"/> : <LogOut size={16}/>} Cerrar sesión
       </button>
     </div>}
-    {error && <div role="alert" className="absolute right-0 top-full z-50 mt-2 w-[min(330px,85vw)] rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">{error}</div>}
+    {error && <Notice tone="error">{error}</Notice>}
   </div>;
 }

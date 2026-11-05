@@ -1,2 +1,2 @@
-// API pública del módulo dashboard; evita imports directos desde el shell.
-export { default } from './Dashboard';
+// Punto de entrada único: conserva el dashboard local y añade el remoto.
+export { default } from './DashboardHub';

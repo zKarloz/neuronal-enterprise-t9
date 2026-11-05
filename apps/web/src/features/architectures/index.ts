@@ -1,2 +1,2 @@
-// API pública del módulo architectures; evita imports directos desde el shell.
-export { default } from './Architectures';
+// Biblioteca pública de M04; cada modo administra su almacenamiento independiente.
+export { default } from './ArchitecturesHub';
