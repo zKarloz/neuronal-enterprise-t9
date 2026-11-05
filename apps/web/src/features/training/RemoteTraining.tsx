@@ -8,6 +8,8 @@ import { type RemoteDataset } from '../../lib/api/datasets';
 import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
   retryJob, watchJobEvents, type DenseLayer, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
 import { EmptyState, Heading, Notice } from '../../components/ui';
+import { MetricChart } from '../../components/MetricChart';
+import { hasAccuracyMetrics, mergeRemoteMetrics, toChartMetrics } from '../../lib/remote-metrics';
 import type { Page } from '../../app/App';
 
 const STATES: Record<RemoteJob['status'], string> = {
@@ -28,7 +30,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [layers, setLayers] = useState<DenseLayer[]>(INIT_LAYERS);
   const [jobs, setJobs] = useState<RemoteJob[]>([]);
   const [jobId, setJobId] = useState('');
-  const [metrics, setMetrics] = useState<EpochMetric[]>([]);
+  // Historial por trabajo: una respuesta REST antigua nunca borra épocas recibidas por SSE.
+  const [metricsByJob, setMetricsByJob] = useState<Record<string, EpochMetric[]>>({});
   const [models, setModels] = useState<RemoteModel[]>([]);
   const [epochs, setEpochs] = useState(10);
   const [batchSize, setBatchSize] = useState(32);
@@ -41,7 +44,14 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [notice, setNotice] = useState('');
   const [transport, setTransport] = useState<'connecting' | 'live' | 'rest' | 'done'>('connecting');
   const selectedJob = jobs.find(job => job.id === jobId);
+  const metrics = metricsByJob[jobId] ?? [];
+  const chartMetrics = toChartMetrics(metrics);
+  const hasAccuracy = hasAccuracyMetrics(metrics);
   const prepared = datasets.filter(item => item.prep_json !== null);
+
+  const storeMetrics = useCallback((id: string, rows: EpochMetric[]) => {
+    setMetricsByJob(current => ({ ...current, [id]: mergeRemoteMetrics(current[id] ?? [], rows) }));
+  }, []);
 
   const token = useCallback(async () => {
     const session = loadSession();
@@ -71,7 +81,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     return () => { alive = false; };
   }, [token]);
   useEffect(() => {
-    setDatasets([]); setArchitectures([]); setJobs([]); setMetrics([]); setModels([]);
+    setDatasets([]); setArchitectures([]); setJobs([]); setMetricsByJob({}); setModels([]);
     if (!projectId) return;
     void refresh(projectId).catch(err => setError(err instanceof Error ? err.message : 'Error de conexión.'));
   }, [projectId, refresh]);
@@ -92,7 +102,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
             if (!active || snapshot.job.id !== jobId) return;
             setTransport('live');
             setJobs(current => current.map(item => item.id === jobId ? snapshot.job : item));
-            setMetrics(snapshot.metrics);
+            storeMetrics(jobId, snapshot.metrics);
             if (snapshot.model) setModels(current => current.some(item => item.id === snapshot.model!.id)
               ? current : [snapshot.model!, ...current]);
             if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(snapshot.job.status)) {
@@ -111,9 +121,9 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     };
     void stream();
     return () => { active = false; controller.abort(); };
-  }, [projectId, jobId, token]);
+  }, [projectId, jobId, token, storeMetrics]);
 
-  // REST es la fuente de verdad y también refresca listas de otros trabajos.
+  // REST refresca la lista de trabajos y respalda SSE si el stream se interrumpe.
   useEffect(() => {
     if (!projectId) return;
     let active = true;
@@ -123,13 +133,13 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     return () => { active = false; window.clearInterval(interval); };
   }, [projectId, refresh, transport]);
   useEffect(() => {
-    if (!projectId || !jobId) { setMetrics([]); return; }
+    if (!projectId || !jobId) return;
     let active = true;
     void token().then(access => getMetrics(projectId, access, jobId)).then(rows => {
-      if (active) setMetrics(rows);
+      if (active) storeMetrics(jobId, rows);
     }).catch(err => { if (active) setError(err instanceof Error ? err.message : 'No se pudieron leer métricas.'); });
     return () => { active = false; };
-  }, [projectId, jobId, jobs, token]);
+  }, [projectId, jobId, selectedJob?.epoch, token, storeMetrics]);
 
   async function action(work: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
@@ -216,6 +226,28 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
           <p className="text-xs text-slate-500">Progreso: {selectedJob.progress}% · {selectedJob.status === 'QUEUED' ? 'Esperando worker' : 'Estado guardado en PostgreSQL'}</p>
           {selectedJob.retry_of_job_id && <p className="text-xs text-slate-500">Reintento de la ejecución {selectedJob.retry_of_job_id.slice(0, 8)}…</p>}
           {selectedJob.error_message && <Notice tone="error">{selectedJob.error_message}</Notice>}
+          <section className="space-y-3" aria-label="Curvas del entrenamiento remoto">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-sm font-bold text-ink"><Activity size={17}/> Curvas de aprendizaje</h3>
+              <span className="text-xs text-slate-500" role="status">
+                {metrics.length} {metrics.length === 1 ? 'época registrada' : 'épocas registradas'} · Actualización automática
+              </span>
+            </div>
+            {metrics.length ? <div className={`grid gap-4 ${hasAccuracy ? 'xl:grid-cols-2' : ''}`}>
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+                <h4 className="mb-2 text-sm font-semibold text-ink">Pérdida · Loss / Val loss</h4>
+                <MetricChart metrics={chartMetrics} kind="loss" height={230}/>
+              </div>
+              {hasAccuracy && <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+                <h4 className="mb-2 text-sm font-semibold text-ink">Precisión · Accuracy / Val accuracy</h4>
+                <MetricChart metrics={chartMetrics} kind="accuracy" height={230}/>
+              </div>}
+            </div> : <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
+              {['QUEUED', 'PREPARING', 'RUNNING'].includes(selectedJob.status)
+                ? 'Esperando la primera época. Los gráficos aparecerán con las métricas de Keras.'
+                : 'Esta ejecución no tiene épocas registradas.'}
+            </div>}
+          </section>
           {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{metric(m.accuracy)}</td><td className="px-3 py-2">{metric(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
           {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
         </> : <EmptyState compact icon={<Activity size={25}/>} title="Sin entrenamientos" description="Crea una arquitectura y encola una ejecución real."/>}

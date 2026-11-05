@@ -1,18 +1,20 @@
-# NeuroLab Enterprise v0.8.0 — candidata
+# NeuroLab Enterprise v0.8.1 — gráficas en vivo para M06
 
-Plataforma modular React/TypeScript/Tailwind + FastAPI + PostgreSQL/Supabase para redes neuronales. Se conservan los diez módulos, los motores locales de TensorFlow.js, los datasets CSV remotos y el worker TensorFlow/Keras independiente.
+Plataforma modular React/TypeScript/Tailwind + FastAPI + PostgreSQL/Supabase para redes neuronales. Se conservan los diez módulos, TensorFlow.js local, CSV remotos, SSE autenticado, worker TensorFlow/Keras y registro privado de modelos.
 
-**Nuevo en v0.8.0 (primera entrega):** Early Stopping configurable en M06; registro privado de modelos con nombre, notas, estados y promoción única por proyecto en M07. Se incluyen CSV públicos Iris, Wine y WDBC en `samples/datasets/` y la migración `005_registry_early_stopping`.
+**Nuevo en v0.8.1:** curvas de pérdida y precisión en M06 que se actualizan por época, se recuperan de PostgreSQL al recargar y resisten respuestas REST atrasadas. Se reutiliza el gráfico SVG de M07 y no se añaden dependencias.
 
-**No ejecutar la v0.8.0 en producción sin comprobar CI y migración.** Revisa `INSTRUCCIONES_PARCHE_V080.md` y `docs/operations/MODELOS_EARLY_STOPPING_V080.md`. La CNN remota queda para una iteración posterior.
+**Base de despliegue:** v0.8.0 estable con migración `005_registry_early_stopping` aplicada. **No se necesita una nueva migración** ni reiniciar el worker para actualizar únicamente el frontend.
 
-**Nuevo en v0.7.0:** monitor autenticado SSE en M06 con respaldo REST, heartbeat y detección de trabajos abandonados, reintentos explícitos conservando el historial, y evaluación de ejecuciones remotas en M07.
+Consulta `INSTRUCCIONES_PARCHE_V081.md` y `docs/operations/GRAFICAS_EN_VIVO_V081.md` antes de fusionar este parche.
+
+**v0.8.0:** Early Stopping configurable, registro de modelos con estados candidato/producción/archivado, y datasets públicos Iris, Wine y Wisconsin en `samples/datasets/`.
+
+**v0.7.0:** monitor SSE + fallback REST, heartbeat del worker, detección de abandonos, reintentos e historial de evaluación M07.
 
 - Frontend Vercel: `apps/web/`.
 - API FastAPI Render: `services/api/`.
 - Worker local Python 3.12: `workers/training/`.
-- PostgreSQL y buckets privados en Supabase.
-- Migración requerida antes del despliegue: `004_live_recovery`.
-- Guía de operaciones: `docs/operations/TIEMPO_REAL_RECUPERACION_V070.md`.
+- PostgreSQL y buckets privados: Supabase.
 
-El entrenamiento sigue requiriendo un worker encendido. La recuperación no reanuda un checkpoint Keras; los trabajos abandonados pasan a FAILED y se pueden reintentar desde cero.
+El entrenamiento remoto requiere un worker en funcionamiento. La recuperación no reanuda automáticamente los pesos a mitad de una época; los trabajos abandonados pueden reintentarse desde cero.
