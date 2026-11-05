@@ -16,14 +16,14 @@ from workers.training.engine import run_once  # noqa: E402
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Worker Feedforward de NeuroLab Enterprise")
+    parser = argparse.ArgumentParser(description="Worker neuronal de NeuroLab Enterprise")
     parser.add_argument("--once", action="store_true", help="Procesa máximo un trabajo y termina")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     url = settings().database_url
     if not url:
         parser.error("DATABASE_URL no está configurada en services/api/.env")
-    logging.info("Worker v0.7 iniciado. Consultando la cola cada cinco segundos.")
+    logging.info("Worker v0.9 iniciado (Feedforward/CNN). Consultando la cola cada cinco segundos.")
     while True:
         did_work = run_once(url)
         if args.once:

@@ -1,6 +1,11 @@
-# Worker Feedforward NeuroLab v0.6.0
+# Worker neuronal NeuroLab v0.9.0
 
-Procesa trabajos desde PostgreSQL y almacena los artefactos Keras en Supabase Storage.
-No es un servicio HTTP y no utiliza GitHub Actions para entrenamientos solicitados por usuarios.
+Procesa trabajos **Feedforward y CNN 8×8** desde PostgreSQL y guarda modelos Keras en Supabase Storage privado.
+TensorFlow solo está instalado en el worker, no en el servicio FastAPI de Render.
 
-Guía completa: `docs/operations/ENTRENAMIENTO_REMOTO_V060.md`.
+Iniciar desde la raíz del repositorio: `source .venv-worker/Scripts/activate && python -m workers.training.run`.
+
+Prueba CNN con dígitos UCI reales (sin secretos):
+`python -m workers.training.cnn_smoke_test`.
+
+El worker no utiliza GitHub Actions para procesar los trabajos de usuarios.
