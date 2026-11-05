@@ -12,14 +12,20 @@ export interface RemoteProject {
 }
 
 export async function request<T>(route: string, token?: string, method = 'GET', body?: object): Promise<T> {
-  const response = await fetch(`${apiUrl}/api/v1${route}`, {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl}/api/v1${route}`, {
+      method,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // Un TypeError de fetch no diferencia fallo de red, bloqueo CORS o proxy.
+    throw new Error('No se pudo conectar con FastAPI. Comprueba la conexión, Render y FRONTEND_ORIGINS.');
+  }
   if (!response.ok) {
     let message = `Error HTTP ${response.status}`;
     try {
