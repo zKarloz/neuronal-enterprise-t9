@@ -1,7 +1,7 @@
 """Entidades SQL versionadas, sin datos de ejemplo precargados."""
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 def clock(): return datetime.now(timezone.utc)
@@ -30,10 +30,13 @@ class AuditEvent(Base):
     actor_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"))
     project_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     action: Mapped[str] = mapped_column(String(80))
+    # No guardar tokens ni contenido de datasets en el historial.
+    target_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)
 
 # Los datos pesados permanecen en Supabase Storage; PostgreSQL solo guarda metadatos.
-from sqlalchemy import JSON, Integer, BigInteger, UniqueConstraint
+from sqlalchemy import Integer, BigInteger, UniqueConstraint
 
 class DatasetRecord(Base):
     __tablename__ = "datasets"

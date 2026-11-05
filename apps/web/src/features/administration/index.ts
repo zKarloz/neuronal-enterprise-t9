@@ -1,2 +1,2 @@
-// API pública del módulo administration; evita imports directos desde el shell.
-export { default } from './Administration';
+// M10 expone un módulo híbrido con la misma navegación que el resto de NeuroLab.
+export { default } from './AdministrationHub';
