@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FileDown, FileJson, FileSpreadsheet, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
+import { Pagination, pageItems } from '../../components/Pagination';
 import { LoadingState, RemoteAuthRequired } from '../../components/RemoteStates';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
@@ -17,6 +18,8 @@ export default function RemoteReports() {
   const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
 
   const token = useCallback(async () => {
     const current = loadSession();
@@ -40,6 +43,7 @@ export default function RemoteReports() {
       .finally(() => { if (active) setLoadingProjects(false); });
     return () => { active = false; };
   }, [session?.access_token, token]);
+  useEffect(() => { setPage(1); }, [projectId]);
   const refresh = useCallback(async () => {
     if (!projectId) return;
     const value = await token();
@@ -116,12 +120,13 @@ export default function RemoteReports() {
           <SectionTitle title={`Informe · ${report.project.name}`} subtitle={`Actualizado: ${formatDate(report.generated_at)} · Hasta ${report.limited_to} registros por categoría`}/>
           {report.jobs.length === 0 ? <EmptyState compact title="Todavía no hay entrenamientos" description="Las exportaciones documentarán los experimentos cuando estén registrados."/> :
             <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-3">Fecha</th><th className="p-3">Estado</th><th className="p-3">Épocas</th><th className="p-3">ID</th></tr></thead>
-              <tbody>{report.jobs.map(job => <tr key={job.id} className="border-t border-slate-100">
+              <tbody>{pageItems(report.jobs, page, pageSize).map(job => <tr key={job.id} className="border-t border-slate-100">
                 <td className="whitespace-nowrap p-3 text-xs text-slate-600">{job.created_at ? formatDate(job.created_at) : '—'}</td>
                 <td className="p-3 text-xs font-semibold text-ink">{job.status}</td>
                 <td className="p-3 text-xs text-slate-600">{job.epochs_executed}/{job.epochs}</td>
                 <td className="p-3 font-mono text-xs text-slate-500">{job.id.slice(0,8)}…</td>
               </tr>)}</tbody></table></div>}
+          <Pagination total={report.jobs.length} page={page} onPageChange={setPage} pageSize={pageSize} onPageSizeChange={setPageSize} label="experimentos"/>
           <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500"><ShieldCheck size={16} className="shrink-0 text-emerald-600"/>
             Los informes no incluyen archivos CSV originales, claves privadas ni pesos del modelo. Las descargas quedan auditadas en el servidor.</div>
         </section>

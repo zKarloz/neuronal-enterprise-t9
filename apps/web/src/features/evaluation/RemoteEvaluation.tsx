@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react';
 import { Activity, CheckCircle2, Cloud, RefreshCw, Tags, Save, Pencil, Star } from 'lucide-react';
 import { MetricChart } from '../../components/MetricChart';
-import { EmptyState, Heading, Notice, formatAccuracy } from '../../components/ui';
+import { EmptyState, Heading, Modal, Notice, formatAccuracy } from '../../components/ui';
+import { Pagination, pageItems } from '../../components/Pagination';
 import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
@@ -36,6 +37,9 @@ export default function RemoteEvaluation() {
   const [modelStage, setModelStage] = useState<ModelStage>('candidate');
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [tab, setTab] = useState<'metrics' | 'models'>('metrics');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [modelsPage, setModelsPage] = useState(1);
 
   function beginEdit(model: RemoteModel) {
     // Los metadatos son editables; el modelo .keras y sus métricas no se sobrescriben.
@@ -126,23 +130,35 @@ export default function RemoteEvaluation() {
   const model = models.find(m => m.job_id === selectedId);
   const compareModel = models.find(m => m.job_id === compareId);
   const comparable = selected && compared && selected.dataset_id === compared.dataset_id;
+  const visibleModels = pageItems(models, modelsPage, 4); // Cuadrícula fija de 2×2.
   // Reutilizar el gráfico nativo sin cambiar las mediciones originales.
   const chartMetrics = metrics.map(m => ({epoch: m.epoch, loss: m.loss, valLoss: m.val_loss,
     accuracy: m.accuracy ?? undefined, valAccuracy: m.val_accuracy ?? undefined}));
 
   if (!configured) return <RemoteUnavailable/>;
   if (!session) return <RemoteAuthRequired/>;
-  if (loadingProjects || loading || loadingMetrics) return <LoadingState label="Cargando evaluaciones y métricas remotas…"/>;
+  if (loadingProjects || loading) return <LoadingState label="Cargando evaluaciones y métricas remotas…"/>;
   return <div className="space-y-5">
     <Heading eyebrow="Análisis · M07 · Servidor" title="Evaluación de modelos Keras" description="Curvas de entrenamiento, validación y resultados de prueba guardados en PostgreSQL. Ninguna cifra es simulada."/>
     {error && <Notice tone="error">{error}</Notice>}
     {notice && <Notice tone="success">{notice}</Notice>}
-    <section className="panel grid gap-3 p-5 sm:grid-cols-2">
+    <div className="panel flex flex-wrap items-center justify-between gap-3 p-4">
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Secciones de evaluación">
+        <button role="tab" aria-selected={tab === 'metrics'} type="button" className={tab === 'metrics' ? 'btn-primary' : 'btn-outline'} onClick={() => setTab('metrics')}>Métricas y comparaciones</button>
+        <button role="tab" aria-selected={tab === 'models'} type="button" className={tab === 'models' ? 'btn-primary' : 'btn-outline'} onClick={() => setTab('models')}>Registro de modelos ({models.length})</button>
+      </div>
+      <button className="btn-outline" type="button" onClick={() => setFiltersOpen(true)}>Proyecto, ejecución y comparación</button>
+    </div>
+    {filtersOpen && <Modal title="Seleccionar evaluación" onClose={() => setFiltersOpen(false)} wide>
+      <div className="grid gap-3 sm:grid-cols-2">
       <div><label className="field-label" htmlFor="evaluation-project">Proyecto</label><select id="evaluation-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>{!projects.length && <option value="">Sin proyectos</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
       <div className="flex items-end gap-2"><span className="text-xs text-slate-500"><Cloud size={15} className="inline"/> Datos remotos persistidos</span>{loading && <RefreshCw size={16} className="animate-spin text-slate-400"/>}</div>
       <div><label className="field-label" htmlFor="evaluation-run">Ejecución principal</label><select id="evaluation-run" className="field" value={selectedId} onChange={e => { setSelectedId(e.target.value); if (e.target.value === compareId) setCompareId(''); }}><option value="">Seleccionar ejecución</option>{jobs.map(j => <option key={j.id} value={j.id}>{new Date(j.created_at).toLocaleString()} · {j.status}</option>)}</select></div>
       <div><label className="field-label" htmlFor="evaluation-compare">Comparar con (opcional)</label><select id="evaluation-compare" className="field" value={compareId} onChange={e => setCompareId(e.target.value)}><option value="">Sin comparación</option>{jobs.filter(j => j.id !== selectedId).map(j => <option key={j.id} value={j.id}>{new Date(j.created_at).toLocaleString()} · {j.status}</option>)}</select></div>
-    </section>
+      </div>
+      <div className="mt-5 flex justify-end"><button className="btn-primary" type="button" onClick={() => setFiltersOpen(false)}>Aplicar selección</button></div>
+    </Modal>}
+    {tab === 'metrics' && (loadingMetrics ? <LoadingState label="Consultando métricas de las ejecuciones…"/> : <>
     {!selected ? <div className="panel p-5"><EmptyState compact icon={<Activity size={28}/>} title="Sin ejecuciones remotas" description="Crea y entrena primero una arquitectura desde M06 → Servidor."/></div> : <>
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="panel p-5"><p className="text-xs text-slate-500">Estado</p><p className="mt-2 font-bold text-ink">{selected.status}</p></div>
@@ -157,14 +173,15 @@ export default function RemoteEvaluation() {
         </tbody></table>
       </section>}
     </>}
-    <section className="panel space-y-4 p-5">
+    </>)}
+    {tab === 'models' && <section className="panel space-y-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Tags size={19}/> Registro de modelos</h2>
         <span className="text-xs text-slate-500">Artefactos privados · trazabilidad por ejecución</span>
       </div>
       {!models.length && <p className="text-sm text-slate-500">Todavía no hay modelos guardados en este proyecto.</p>}
       <div className="grid gap-3 lg:grid-cols-2">
-        {models.map(m => {
+        {visibleModels.map(m => {
           const run = jobs.find(j => j.id === m.job_id);
           return <article key={m.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
             <div className="flex items-start justify-between gap-2">
@@ -193,6 +210,7 @@ export default function RemoteEvaluation() {
           </article>;
         })}
       </div>
-    </section>
+      <Pagination total={models.length} page={modelsPage} onPageChange={setModelsPage} pageSize={4} fixedSize label="modelos"/>
+    </section>}
   </div>;
 }

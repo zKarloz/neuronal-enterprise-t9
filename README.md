@@ -1,4 +1,4 @@
-# NeuroLab Enterprise v0.10.1 — Registro de modelos, reportes e interfaz unificada
+# NeuroLab Enterprise v0.10.2 — Organización visual y modales compartidos
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
@@ -22,7 +22,7 @@ Lee `INSTRUCCIONES_PARCHE_V090.md` y `docs/operations/CNN_REMOTA_V090.md`.
 
 Consulta `INSTRUCCIONES_PARCHE_V091.md` y `docs/operations/CORS_AVISOS_NAVEGACION_V091.md`.
 
-## v0.10.1 — Artefactos M08, reportes M09 e interfaz coherente
+## v0.10.0 — Artefactos M08, reportes M09 e interfaz coherente
 
 - M08 permite gestionar modelos Keras remotos y descargarlos mediante FastAPI con autenticación, validación SHA-256 y registro de auditoría. El bucket se mantiene privado.
 - M09 puede elaborar fichas y reportes remotos en JSON, CSV y PDF con datos realmente persistidos, limitando el alcance para proteger recursos.
@@ -31,3 +31,11 @@ Consulta `INSTRUCCIONES_PARCHE_V091.md` y `docs/operations/CORS_AVISOS_NAVEGACIO
 - Sin migraciones nuevas; se añadió la dependencia Python `reportlab` para exportación PDF.
 
 Consulta `INSTRUCCIONES_PARCHE_V100.md` y `docs/operations/MODELOS_REPORTES_UI_V100.md`.
+
+## Frontend v0.10.1 y v0.10.2
+
+- **v0.10.1:** panel de cuenta, M04 remoto, toasts flotantes, spinner y tema oscuro neutro.
+- **v0.10.2:** formularios remotos de Proyectos y Entrenamientos dentro de modales comunes; preparación y vista previa de Datasets en diálogos; subpestaña de modelos con cuadrícula 2×2 en Evaluación; paginación de informes locales y remotos con 5/10/20 (predeterminado 5); panel local y de servidor visualmente alineados; avisos informativos una vez por sesión; bordes y tarjetas atenuados en modo oscuro.
+- Solo cambia `apps/web`: API y worker se mantienen en sus versiones actuales. No hay migraciones ni cambios de buckets.
+
+Consulta `docs/operations/EXPERIENCIA_USUARIO_V102.md`.

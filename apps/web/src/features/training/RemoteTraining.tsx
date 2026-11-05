@@ -7,7 +7,7 @@ import { ensureSession, loadSession, SESSION_CHANGED } from '../../lib/api/sessi
 import { type RemoteDataset } from '../../lib/api/datasets';
 import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
   retryJob, watchJobEvents, type DenseLayer, type ArchitectureDraft, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
-import { EmptyState, Heading, Notice, formatAccuracy } from '../../components/ui';
+import { EmptyState, Heading, Modal, Notice, formatAccuracy } from '../../components/ui';
 import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import { MetricChart } from '../../components/MetricChart';
 import { hasAccuracyMetrics, mergeRemoteMetrics, toChartMetrics } from '../../lib/remote-metrics';
@@ -57,6 +57,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   // Fallos recuperables de sincronización: no contradicen un trabajo ya completado.
   const [syncError, setSyncError] = useState('');
   const [notice, setNotice] = useState('');
+  const [editorModal, setEditorModal] = useState<'architecture' | 'job' | null>(null);
   const [transport, setTransport] = useState<'connecting' | 'live' | 'rest' | 'done'>('connecting');
   const selectedJob = jobs.find(job => job.id === jobId);
   const metrics = metricsByJob[jobId] ?? [];
@@ -209,8 +210,13 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
       <span className="text-xs text-slate-500"><Cloud size={15} className="inline"/> API propia</span>
     </section>
     {!projectId ? <div className="panel p-5"><EmptyState icon={<Database size={24}/>} title="Crea un proyecto remoto" description="Crea primero un proyecto en Proyectos de IA → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div> : <>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <section className="panel p-5 space-y-4">
+      <section className="panel flex flex-wrap items-center gap-3 p-5" aria-label="Acciones de entrenamiento">
+        <button className="btn-outline" type="button" onClick={() => setEditorModal('architecture')}><BrainCircuit size={18}/> Arquitecturas neuronales</button>
+        <button className="btn-primary" type="button" onClick={() => setEditorModal('job')}><Plus size={18}/> Nuevo entrenamiento</button>
+        <span className="text-xs text-slate-500">{architectures.length} arquitecturas · {prepared.length} datasets preparados</span>
+      </section>
+      {editorModal === 'architecture' && <Modal title="Arquitecturas neuronales" wide onClose={() => setEditorModal(null)}>
+        <div className="space-y-4">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink"><BrainCircuit size={19}/> Arquitecturas neuronales</h2>
           <div><label htmlFor="arch-family" className="field-label">Tipo de red</label>
             <select id="arch-family" className="field" value={family} onChange={e => {
@@ -244,11 +250,13 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
               : { name, family, layers };
             const item = await createArchitecture(projectId, await token(), draft);
             await refresh(projectId); setArchitectureId(item.id);
-            setNotice(`Arquitectura ${item.name}, versión ${item.version}, guardada.`);
+            setNotice(`Arquitectura ${item.name}, versión ${item.version}, guardada.`); setEditorModal(null);
           })}><CheckCircle2 size={16}/> Guardar versión</button>
           <p className="text-xs text-slate-500">La salida se ajusta al dataset; las arquitecturas se versionan de forma inmutable. CNN exige pixel_0 … pixel_63 y clasificación en M05.</p>
-        </section>
-        <section className="panel p-5 space-y-4">
+        </div>
+      </Modal>}
+      {editorModal === 'job' && <Modal title="Nuevo entrenamiento" wide onClose={() => setEditorModal(null)}>
+        <div className="space-y-4">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Activity size={19}/> Nuevo entrenamiento</h2>
           <div><label className="field-label" htmlFor="remote-job-dataset">Dataset preparado (M05)</label><select id="remote-job-dataset" className="field" value={datasetId} onChange={e => setDatasetId(e.target.value)}><option value="">Seleccionar dataset</option>{prepared.map(d => <option key={d.id} value={d.id}>{d.name} · v{d.version} · {d.prep_json?.task}</option>)}</select></div>
           <div><label className="field-label" htmlFor="remote-job-architecture">Arquitectura guardada</label><select id="remote-job-architecture" className="field" value={architectureId} onChange={e => setArchitectureId(e.target.value)}><option value="">Seleccionar arquitectura</option>{architectures.map(a => <option key={a.id} value={a.id}>{a.name} · {a.family === 'cnn_8x8' ? 'CNN 8×8' : 'Feedforward'} · v{a.version}</option>)}</select></div>
@@ -274,11 +282,12 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
             setJobs(current => [item, ...current.filter(job => job.id !== item.id)]);
             setJobId(item.id);
             setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
+            setEditorModal(null);
             try { await refresh(projectId); }
             catch (err) { setSyncError(err instanceof Error ? err.message : 'Sincronización pendiente.'); }
           })}>{busy ? <Loader2 size={17} className="animate-spin"/> : <Plus size={17}/>} Encolar entrenamiento</button>
-        </section>
-      </div>
+        </div>
+      </Modal>}
       <section className="panel p-5 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-bold text-ink">Monitor de trabajos persistidos</h2>
@@ -326,7 +335,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
             </div>}
           </section>
           {metrics.length > 0 && <div className="overflow-x-auto"><table className="w-full text-right text-xs"><thead><tr className="border-b text-slate-500">{['Época', 'Loss', 'Val loss', 'Accuracy', 'Val accuracy'].map(k => <th className="px-3 py-2" key={k}>{k}</th>)}</tr></thead><tbody>{metrics.map(m => <tr key={m.epoch} className="border-b border-slate-100"><td className="px-3 py-2">{m.epoch}</td><td className="px-3 py-2">{metric(m.loss)}</td><td className="px-3 py-2">{metric(m.val_loss)}</td><td className="px-3 py-2">{formatAccuracy(m.accuracy)}</td><td className="px-3 py-2">{formatAccuracy(m.val_accuracy)}</td></tr>)}</tbody></table></div>}
-          {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${key.includes('accuracy') ? formatAccuracy(val) : metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
+          {models.filter(model => model.job_id === selectedJob.id).map(model => <div key={model.id} className="saved-model-card rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"><strong>Modelo Keras guardado</strong><p className="mt-1">Evaluación sobre test independiente: {Object.entries(model.test_metrics).map(([key, val]) => `${key}: ${key.includes('accuracy') ? formatAccuracy(val) : metric(val)}`).join(' · ')}</p><p className="mt-1 break-all text-[11px]">SHA-256: {model.sha256}</p></div>)}
         </> : <EmptyState compact icon={<Activity size={25}/>} title="Sin entrenamientos" description="Crea una arquitectura y encola una ejecución real."/>}
       </section>
     </>}

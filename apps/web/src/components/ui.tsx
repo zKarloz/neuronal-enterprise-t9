@@ -1,5 +1,5 @@
 // Biblioteca de componentes compartidos de interfaz enterprise.
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ArrowRight, Cloud, HardDrive, Inbox, X } from 'lucide-react';
 import { FloatingNotice, type ToastTone } from './ToastProvider';
 
@@ -38,12 +38,37 @@ export function EmptyState({ icon, title, description, action, compact = false }
 export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: ToastTone }) {
   return <FloatingNotice tone={tone}>{children}</FloatingNotice>;
 }
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <section role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-lg rounded-2xl bg-white shadow-float">
-      <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5"><h2 className="text-lg font-bold text-ink">{title}</h2><button className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Cerrar" onClick={onClose}><X size={20}/></button></div>
-      <div className="px-6 py-5">{children}</div>
-      {footer && <div className="flex justify-end gap-2 border-t border-slate-100 px-6 py-4">{footer}</div>}
+/** Diálogo compartido: adaptable, desplazable y cerrado con Escape o clic exterior. */
+export function Modal({ title, onClose, children, footer, wide = false }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    // Conservar el foco y bloquear el scroll mientras el diálogo esté abierto.
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ) ?? []).filter(element => element.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const onKeyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeRef.current(); }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKeyboard);
+    return () => { document.removeEventListener('keydown', onKeyboard); document.body.style.overflow = previousOverflow; previousFocus?.focus(); };
+  }, []);
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 sm:p-6" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+    <section ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} className={`modal-surface flex max-h-[90dvh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-float ${wide ? 'max-w-3xl' : 'max-w-lg'}`}>
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4"><h2 className="text-lg font-bold text-ink">{title}</h2><button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Cerrar" onClick={onClose}><X size={20}/></button></div>
+      <div className="min-h-0 overflow-y-auto px-5 py-5">{children}</div>
+      {footer && <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4">{footer}</div>}
     </section>
   </div>;
 }
