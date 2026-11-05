@@ -1,11 +1,12 @@
 /** M05 remoto: carga, exploración y preparación de datos reales via FastAPI. */
 import { useEffect, useRef, useState } from 'react';
-import { Cloud, Database, Download, FileSpreadsheet, Loader2, RefreshCw, ShieldCheck, Trash2, UploadCloud } from 'lucide-react';
+import { Cloud, Database, Download, FileSpreadsheet, Loader2, RefreshCw, Trash2, UploadCloud } from 'lucide-react';
 import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
-import { ensureSession, loadSession, type RemoteSession } from '../../lib/api/session';
+import { ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
 import { downloadRemoteCsv, prepareRemoteCsv, uploadRemoteCsv, type RemoteDataset } from '../../lib/api/datasets';
 import { EmptyState, Heading, Notice } from '../../components/ui';
+import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import type { Page } from '../../app/App';
 
 export default function RemoteDatasets({ navigate }: { navigate: (page: Page) => void }) {
@@ -21,15 +22,24 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
   const [test, setTest] = useState(15);
   const [seed, setSeed] = useState(42);
   const [busy, setBusy] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingDatasets, setLoadingDatasets] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = datasets.find(dataset => dataset.id === selectedId);
 
+  // La sesión del topbar gobierna todas las vistas, incluso al cerrar Google aquí.
+  useEffect(() => {
+    const sync = () => setSession(loadSession());
+    window.addEventListener(SESSION_CHANGED, sync);
+    return () => window.removeEventListener(SESSION_CHANGED, sync);
+  }, []);
+
   // Renovar el JWT cuando sea necesario; nunca acceder directamente a Supabase.
   async function token(): Promise<string> {
     const current = session ?? loadSession();
-    if (!current) throw new Error('Inicia sesión con Google desde M02 → Servidor.');
+    if (!current) throw new Error('Inicia sesión con Google desde el topbar.');
     const refreshed = await ensureSession(current);
     if (refreshed !== current) setSession(refreshed);
     return refreshed.access_token;
@@ -51,7 +61,8 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
 
   useEffect(() => {
     let alive = true;
-    if (!configured || !session) return;
+    if (!configured || !session) { setLoadingProjects(false); return; }
+    setLoadingProjects(true);
     void ensureSession(session).then(async current => {
       const rows = await request<RemoteProject[]>('/projects', current.access_token);
       if (alive) {
@@ -59,14 +70,16 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
         setProjects(rows);
         setProjectId(previous => rows.some(project => project.id === previous) ? previous : (rows[0]?.id ?? ''));
       }
-    }).catch((cause: unknown) => { if (alive) setError(cause instanceof Error ? cause.message : 'No se pudieron consultar los proyectos.'); });
+    }).catch((cause: unknown) => { if (alive) setError(cause instanceof Error ? cause.message : 'No se pudieron consultar los proyectos.'); })
+      .finally(() => { if (alive) setLoadingProjects(false); });
     return () => { alive = false; };
     // La sesión de Google solo se valida en el montaje o al actualizar su token.
   }, [session?.access_token]);
 
   useEffect(() => {
     let alive = true;
-    if (!projectId || !session) { setDatasets([]); return; }
+    if (!projectId || !session) { setDatasets([]); setLoadingDatasets(false); return; }
+    setLoadingDatasets(true);
     void (async () => {
       const access = await token();
       const rows = await request<RemoteDataset[]>(`/projects/${projectId}/datasets`, access);
@@ -74,7 +87,8 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
         setDatasets(rows);
         setSelectedId(previous => rows.some(item => item.id === previous) ? previous : (rows[0]?.id ?? ''));
       }
-    })().catch((cause: unknown) => { if (alive) setError(cause instanceof Error ? cause.message : 'Error al recuperar datasets.'); });
+    })().catch((cause: unknown) => { if (alive) setError(cause instanceof Error ? cause.message : 'Error al recuperar datasets.'); })
+      .finally(() => { if (alive) setLoadingDatasets(false); });
     return () => { alive = false; };
   }, [projectId, session?.access_token]);
 
@@ -90,11 +104,9 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
     finally { setBusy(false); }
   }
 
-  if (!configured) return <Notice tone="warning">Configura VITE_API_BASE_URL para habilitar los datasets remotos.</Notice>;
-  if (!session) return <>
-    <Heading eyebrow="Datos · M05" title="Datasets del servidor" description="Trabaja con archivos privados administrados desde nuestra API."/>
-    <div className="panel p-6"><EmptyState icon={<ShieldCheck size={28}/>} title="Inicia sesión para importar datasets" description="Accede primero con Google desde Proyectos → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Ir a Proyectos</button>}/></div>
-  </>;
+  if (!configured) return <RemoteUnavailable/>;
+  if (!session) return <RemoteAuthRequired/>;
+  if (loadingProjects) return <LoadingState label="Cargando proyectos del servidor…"/>;
 
   return <div className="space-y-5">
     <Heading eyebrow="Datos · M05 · Servidor" title="Datasets remotos" description="Sube CSV reales a un bucket privado de Supabase Storage a través de FastAPI. Los datos locales permanecen separados."/>
@@ -109,7 +121,7 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
       <button className="btn-outline" disabled={busy} onClick={() => void action(async () => { await loadProjects(); if (projectId) await loadDatasets(projectId); })}><RefreshCw size={16}/> Actualizar</button>
       <span className="inline-flex items-center gap-1.5 text-xs text-slate-500"><Cloud size={14}/> {session.email}</span>
     </div>
-    {!projectId ? <div className="panel p-6"><EmptyState icon={<Database size={27}/>} title="Crea un proyecto remoto primero" description="Los datasets remotos siempre pertenecen a un proyecto autorizado." action={<button className="btn-primary" onClick={() => navigate('projects')}>Crear proyecto en M02</button>}/></div> : <>
+    {!projectId ? <div className="panel p-6"><EmptyState icon={<Database size={27}/>} title="Crea un proyecto remoto primero" description="Los datasets remotos siempre pertenecen a un proyecto autorizado." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div> : <>
       <section className="panel p-5">
         <h2 className="mb-1 text-base font-bold text-ink">Importar CSV al servidor</h2>
         <p className="mb-4 text-xs leading-5 text-slate-500">UTF-8 · Hasta 5 MB · 20.000 registros · 65 columnas (64 píxeles + etiqueta para CNN). Encabezados únicos. Archivos almacenados en privado, no en el disco temporal de Render.</p>
@@ -128,7 +140,7 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
       </section>
       <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
         <section className="panel p-4"><h2 className="mb-3 text-sm font-bold text-ink">Versiones almacenadas ({datasets.length})</h2>
-          {!datasets.length ? <p className="text-xs leading-5 text-slate-500">No hay datasets remotos en este proyecto.</p> : <div className="space-y-2">
+          {loadingDatasets ? <LoadingState label="Cargando datasets del proyecto…"/> : !datasets.length ? <p className="text-xs leading-5 text-slate-500">No hay datasets remotos en este proyecto.</p> : <div className="space-y-2">
             {datasets.map(item => <button type="button" key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded-xl border p-3 text-left transition-colors ${selectedId === item.id ? 'border-primary-300 bg-primary-50' : 'border-slate-200 hover:bg-slate-50'}`}>
               <strong className="block truncate text-xs text-ink">{item.name} · v{item.version}</strong>
               <span className="mt-1 block text-[11px] text-slate-500">{item.row_count} filas · {item.column_count} columnas</span>

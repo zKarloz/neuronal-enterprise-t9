@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Archive, CheckCircle2, Download, LoaderCircle, RefreshCw, Save, ShieldCheck } from 'lucide-react';
 import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
+import { LoadingState, RemoteAuthRequired } from '../../components/RemoteStates';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
 import { downloadModel, getModels, updateModel, type ModelStage, type RemoteModel } from '../../lib/api/training';
@@ -17,6 +18,8 @@ export default function RemoteModels() {
   const [notes, setNotes] = useState('');
   const [stage, setStage] = useState<ModelStage>('candidate');
   const [busy, setBusy] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -34,10 +37,12 @@ export default function RemoteModels() {
   }, []);
   useEffect(() => {
     let active = true;
-    if (!session) { setProjects([]); setModels([]); return; }
+    if (!session) { setProjects([]); setModels([]); setLoadingProjects(false); return; }
+    setLoadingProjects(true);
     void withSession().then(token => request<RemoteProject[]>('/projects', token)).then(rows => {
       if (active) { setProjects(rows); setProjectId(old => rows.some(p => p.id === old) ? old : (rows[0]?.id ?? '')); }
-    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los proyectos.'); });
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los proyectos.'); })
+      .finally(() => { if (active) setLoadingProjects(false); });
     return () => { active = false; };
   }, [session?.access_token, withSession]);
   const refresh = useCallback(async () => {
@@ -48,9 +53,11 @@ export default function RemoteModels() {
   useEffect(() => {
     let active = true;
     setModels([]); setSelectedId('');
-    if (projectId) void withSession().then(token => getModels(projectId, token)).then(items => {
+    if (projectId) { setLoadingModels(true); void withSession().then(token => getModels(projectId, token)).then(items => {
       if (active) setModels(items);
-    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los modelos.'); });
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los modelos.'); })
+      .finally(() => { if (active) setLoadingModels(false); }); }
+    else setLoadingModels(false);
     return () => { active = false; };
   }, [projectId, withSession]);
   const selected = models.find(model => model.id === selectedId) ?? models[0];
@@ -65,9 +72,10 @@ export default function RemoteModels() {
     finally { setBusy(false); }
   }
 
+  if (session && (loadingProjects || loadingModels)) return <LoadingState label="Cargando modelos de tu cuenta…"/>;
   return <>
     <Heading title="Registro de modelos del servidor" description="Organiza versiones Keras inmutables, consulta sus métricas y descarga únicamente los artefactos de tus proyectos autorizados."/>
-    {!session ? <Notice tone="info">Inicia sesión con Google desde el topbar para consultar tus modelos remotos.</Notice> : <>
+    {!session ? <RemoteAuthRequired/> : <>
       <div className="panel mb-5 flex flex-wrap items-end gap-3 p-4">
         <div className="min-w-[220px] flex-1"><label className="field-label" htmlFor="registry-project">Proyecto remoto</label>
           <select id="registry-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>
@@ -96,7 +104,7 @@ export default function RemoteModels() {
               })}>{busy ? <LoaderCircle size={16} className="animate-spin"/> : <Download size={16}/>} Descargar .keras</button></div>
             <div className="mb-5 grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Test accuracy</span><p className="mt-1 text-lg font-bold text-ink">{selected.test_metrics.accuracy == null ? '—' : `${(selected.test_metrics.accuracy * 100).toFixed(2)} %`}</p></div>
-              <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Test loss</span><p className="mt-1 text-lg font-bold text-ink">{selected.test_metrics.loss?.toFixed(5) ?? '—'}</p></div>
+              <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Test loss</span><p className="mt-1 text-lg font-bold text-ink">{selected.test_metrics.loss?.toFixed(3) ?? '—'}</p></div>
               <div className="rounded-xl bg-slate-50 p-3"><span className="text-xs text-slate-500">Épocas entrenadas</span><p className="mt-1 text-lg font-bold text-ink">{selected.epochs_trained ?? '—'}</p></div>
             </div>
             <div className="space-y-3">

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FileDown, FileJson, FileSpreadsheet, FileText, RefreshCw, ShieldCheck } from 'lucide-react';
 import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
+import { LoadingState, RemoteAuthRequired } from '../../components/RemoteStates';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
 import { downloadEpochsCsv, downloadProjectPdf, getProjectReport, type ProjectReport } from '../../lib/api/reports';
@@ -12,6 +13,8 @@ export default function RemoteReports() {
   const [projectId, setProjectId] = useState('');
   const [report, setReport] = useState<ProjectReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(true);
+  const [loadingReport, setLoadingReport] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -29,10 +32,12 @@ export default function RemoteReports() {
   }, []);
   useEffect(() => {
     let active = true;
-    if (!session) { setProjects([]); setReport(null); return; }
+    if (!session) { setProjects([]); setReport(null); setLoadingProjects(false); return; }
+    setLoadingProjects(true);
     void token().then(value => request<RemoteProject[]>('/projects', value)).then(rows => {
       if (active) { setProjects(rows); setProjectId(old => rows.some(p => p.id === old) ? old : (rows[0]?.id ?? '')); }
-    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los proyectos.'); });
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los proyectos.'); })
+      .finally(() => { if (active) setLoadingProjects(false); });
     return () => { active = false; };
   }, [session?.access_token, token]);
   const refresh = useCallback(async () => {
@@ -43,9 +48,11 @@ export default function RemoteReports() {
   useEffect(() => {
     let active = true;
     setReport(null);
-    if (projectId) void token().then(value => getProjectReport(projectId, value)).then(result => {
+    if (projectId) { setLoadingReport(true); void token().then(value => getProjectReport(projectId, value)).then(result => {
       if (active) setReport(result);
-    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudo recuperar el informe.'); });
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudo recuperar el informe.'); })
+      .finally(() => { if (active) setLoadingReport(false); }); }
+    else setLoadingReport(false);
     return () => { active = false; };
   }, [projectId, token]);
   async function perform(work: () => Promise<void>) {
@@ -64,9 +71,10 @@ export default function RemoteReports() {
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
+  if (session && (loadingProjects || loadingReport)) return <LoadingState label="Preparando reportes y exportaciones…"/>;
   return <>
     <Heading title="Reportes del servidor" description="Documenta proyectos, configuraciones y resultados guardados en PostgreSQL. Las descargas requieren una sesión autorizada."/>
-    {!session ? <Notice tone="info">Inicia sesión con Google desde el topbar para generar reportes de tus proyectos remotos.</Notice> : <>
+    {!session ? <RemoteAuthRequired/> : <>
       <div className="panel mb-5 flex flex-wrap items-end gap-3 p-4">
         <div className="min-w-[220px] flex-1"><label className="field-label" htmlFor="report-project">Proyecto remoto</label>
           <select id="report-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>

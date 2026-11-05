@@ -73,3 +73,39 @@ button:disabled { cursor: not-allowed; }
   --scrollbar-thumb: rgba(148, 163, 184, 0.42);
   --scrollbar-thumb-hover: rgba(148, 163, 184, 0.75);
 }
+
+/* Tema oscuro neutro: los colores semánticos de éxito, error y advertencia permanecen. */
+.theme-dark { --scrollbar-thumb: #52525b; --scrollbar-thumb-hover: #71717a; background: #0b0b0d; color: #f4f4f5; }
+.theme-dark body, .theme-dark .bg-canvas { background: #0b0b0d !important; }
+.theme-dark .site-topbar, .theme-dark .panel, .theme-dark .bg-white, .theme-dark .field,
+.theme-dark .btn-outline { background-color: #18181b !important; color: #f4f4f5; }
+.theme-dark .bg-slate-50, .theme-dark .bg-slate-100, .theme-dark .bg-slate-200,
+.theme-dark .bg-primary-50, .theme-dark .bg-primary-100 { background-color: #27272a !important; }
+.theme-dark .bg-primary-500\/20 { background-color: #3f3f46 !important; }
+.theme-dark .text-ink, .theme-dark .text-slate-900, .theme-dark .text-slate-800,
+.theme-dark .text-slate-700, .theme-dark .text-primary-700 { color: #f4f4f5 !important; }
+.theme-dark .text-slate-600, .theme-dark .text-slate-500,
+.theme-dark .text-slate-400, .theme-dark .text-primary-600,
+.theme-dark .text-primary-500 { color: #b4b4bc !important; }
+.theme-dark .border-slate-100, .theme-dark .border-slate-200,
+.theme-dark .border-primary-100, .theme-dark .border-primary-200 { border-color: #3f3f46 !important; }
+.theme-dark .btn-primary { background: #e4e4e7 !important; color: #18181b !important; }
+.theme-dark .btn-primary:hover { background: white !important; }
+.theme-dark .btn-soft { background: #3f3f46 !important; color: #f4f4f5 !important; }
+.theme-dark .field:focus { border-color: #a1a1aa !important; }
+.theme-dark .scrollbar-sidebar { background: #111113 !important; }
+.theme-dark .sidebar-logo { background: linear-gradient(135deg, #52525b, #27272a) !important; }
+.theme-dark .bg-gradient-to-r { background-image: none !important; background-color: #27272a !important; }
+.theme-dark .shadow-panel { box-shadow: 0 8px 28px rgba(0,0,0,.25); }
+.theme-dark .text-blue-100, .theme-dark .text-blue-200 { color: #d4d4d8 !important; }
+.theme-dark .theme-toggle:hover { background: #27272a; }
+@media (prefers-reduced-motion: reduce) { .theme-dark *, .theme-dark *::before, .theme-dark *::after { scroll-behavior: auto !important; } }
+
+.theme-dark .bg-blue-50, .theme-dark .bg-sky-50, .theme-dark .bg-violet-50 { background-color: #27272a !important; }
+.theme-dark .border-blue-100, .theme-dark .border-sky-200 { border-color: #52525b !important; }
+.theme-dark .text-blue-900, .theme-dark .text-sky-900, .theme-dark .text-violet-600 { color: #e4e4e7 !important; }
+
+/* Curvas con contraste neutro en el tema gris. Los datos numéricos no cambian. */
+.theme-dark { --chart-training: #e4e4e7; --chart-validation: #a1a1aa; --chart-grid: #3f3f46; --chart-label: #a1a1aa; --chart-point-border: #18181b; }
+.theme-dark .bg-primary-500 { background-color: #a1a1aa !important; }
+.theme-dark .bg-teal-500 { background-color: #71717a !important; }
