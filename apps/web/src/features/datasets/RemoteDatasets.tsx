@@ -5,7 +5,8 @@ import { configured } from '../../lib/api/config';
 import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
 import { downloadRemoteCsv, prepareRemoteCsv, uploadRemoteCsv, type RemoteDataset } from '../../lib/api/datasets';
-import { EmptyState, Heading, Notice } from '../../components/ui';
+import { EmptyState, Heading, Modal, Notice } from '../../components/ui';
+import { Pagination, pageItems } from '../../components/Pagination';
 import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
 import type { Page } from '../../app/App';
 
@@ -26,6 +27,10 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
   const [loadingDatasets, setLoadingDatasets] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [prepareOpen, setPrepareOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [schemaPage, setSchemaPage] = useState(1);
+  const [schemaSize, setSchemaSize] = useState(5);
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = datasets.find(dataset => dataset.id === selectedId);
 
@@ -93,6 +98,7 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
   }, [projectId, session?.access_token]);
 
   useEffect(() => {
+    setSchemaPage(1); setPreviewOpen(false); setPrepareOpen(false);
     setTarget(selected?.prep_json?.target_column ?? selected?.columns_json.at(-1)?.name ?? '');
     setTask(selected?.prep_json?.task ?? 'classification');
   }, [selectedId]);
@@ -164,10 +170,25 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
                 }}><Trash2 size={15}/> Eliminar</button>
               </div>
             </div>
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Esquema detectado</h3>
-            <div className="mb-5 flex flex-wrap gap-2">{selected.columns_json.map(column => <div key={column.name} className="rounded-lg border border-slate-200 px-3 py-2 text-xs"><strong className="text-ink">{column.name}</strong><span className="ml-2 text-slate-500">{column.type === 'number' ? 'Numérica' : 'Texto'}</span><span className="ml-2 text-amber-600">{column.null_count} nulos</span></div>)}</div>
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Vista previa de registros reales</h3>
-            <div className="mb-5 max-w-full overflow-x-auto rounded-xl border border-slate-200"><table className="w-full text-left text-xs"><thead className="bg-slate-50"><tr>{selected.columns_json.map(col => <th className="whitespace-nowrap px-3 py-2 font-semibold" key={col.name}>{col.name}</th>)}</tr></thead><tbody>{selected.preview_json.map((row, i) => <tr key={i} className="border-t border-slate-100">{row.map((cell, j) => <td key={j} className="max-w-48 truncate whitespace-nowrap px-3 py-2 text-slate-600" title={cell}>{cell || '—'}</td>)}</tr>)}</tbody></table></div>
+            <section className="mb-5 rounded-xl border border-slate-200 p-4">
+              <h3 className="mb-2 text-sm font-bold text-ink">Esquema detectado · {selected.columns_json.length} columnas</h3>
+              <div className="flex flex-wrap gap-2">{pageItems(selected.columns_json, schemaPage, schemaSize).map(column =>
+                <div key={column.name} className="rounded-lg border border-slate-200 px-3 py-2 text-xs"><strong className="text-ink">{column.name}</strong>
+                  <span className="ml-2 text-slate-500">{column.type === 'number' ? 'Numérica' : 'Texto'}</span>
+                  <span className="ml-2 text-amber-600">{column.null_count} nulos</span>
+                </div>)}</div>
+              <Pagination total={selected.columns_json.length} page={schemaPage} onPageChange={setSchemaPage} pageSize={schemaSize} onPageSizeChange={setSchemaSize} label="columnas"/>
+            </section>
+            <div className="mb-5 flex flex-wrap gap-2">
+              <button type="button" className="btn-outline" onClick={() => setPreviewOpen(true)}><FileSpreadsheet size={16}/> Vista previa de registros reales</button>
+              <button type="button" className="btn-primary" onClick={() => setPrepareOpen(true)}><Database size={16}/> Preparar para entrenamiento futuro</button>
+            </div>
+            {previewOpen && <Modal title="Vista previa de registros reales" wide onClose={() => setPreviewOpen(false)}>
+              <p className="mb-3 text-xs text-slate-500">{selected.preview_json.length} registros de muestra. Esta vista no modifica el dataset.</p>
+              <div className="max-w-full overflow-x-auto rounded-xl border border-slate-200"><table className="w-full text-left text-xs"><thead className="bg-slate-50"><tr>{selected.columns_json.map(col => <th className="whitespace-nowrap px-3 py-2 font-semibold" key={col.name}>{col.name}</th>)}</tr></thead>
+              <tbody>{selected.preview_json.map((row, i) => <tr key={i} className="border-t border-slate-100">{row.map((cell, j) => <td key={j} className="max-w-48 truncate whitespace-nowrap px-3 py-2 text-slate-600" title={cell}>{cell || '—'}</td>)}</tr>)}</tbody></table></div>
+            </Modal>}
+            {prepareOpen && <Modal title="Preparar dataset para entrenamiento" wide onClose={() => setPrepareOpen(false)}>
             <h3 className="mb-3 text-sm font-bold text-ink">Preparar para entrenamiento futuro</h3>
             <div className="grid gap-3 sm:grid-cols-2">
               <div><label htmlFor="remote-target" className="field-label">Variable objetivo</label><select id="remote-target" value={target} onChange={e => setTarget(e.target.value)} className="field">{selected.columns_json.map(column => <option key={column.name} value={column.name}>{column.name}</option>)}</select></div>
@@ -181,7 +202,9 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
               const item = await prepareRemoteCsv(projectId, selected.id, await token(), target, task, validation / 100, test / 100, seed);
               setDatasets(previous => previous.map(dataset => dataset.id === item.id ? item : dataset));
               setNotice('Preparación completada y registrada en PostgreSQL.');
+              setPrepareOpen(false);
             })}><Database size={16}/> Preparar dataset</button>
+            </Modal>}
             {selected.prep_json && <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
               <p className="mb-2 text-xs font-bold text-emerald-800">Preparación persistida · {selected.prep_json.task === 'classification' ? 'Clasificación' : 'Regresión'}</p>
               <div className="flex flex-wrap gap-4 text-xs text-slate-700"><span>Train: <strong>{selected.prep_json.split.train}</strong></span><span>Validación: <strong>{selected.prep_json.split.validation}</strong></span><span>Prueba: <strong>{selected.prep_json.split.test}</strong></span><span>Dimensiones: <strong>{selected.prep_json.input_dimensions}</strong></span></div>

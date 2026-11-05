@@ -109,3 +109,28 @@ button:disabled { cursor: not-allowed; }
 .theme-dark { --chart-training: #e4e4e7; --chart-validation: #a1a1aa; --chart-grid: #3f3f46; --chart-label: #a1a1aa; --chart-point-border: #18181b; }
 .theme-dark .bg-primary-500 { background-color: #a1a1aa !important; }
 .theme-dark .bg-teal-500 { background-color: #71717a !important; }
+
+/* v0.10.2: superficies y divisiones discretas, también en modales y tablas. */
+.theme-dark .panel, .theme-dark .modal-surface, .theme-dark .field,
+.theme-dark .btn-outline, .theme-dark .theme-toggle { border-color: #37373c !important; }
+.theme-dark .modal-surface { background: #18181b !important; color: #f4f4f5; }
+.theme-dark .border-slate-300, .theme-dark .border-slate-400,
+.theme-dark .border-white, .theme-dark .border-white\/20,
+.theme-dark .border-primary-300, .theme-dark .border-primary-400,
+.theme-dark .border-violet-100, .theme-dark .border-emerald-100,
+.theme-dark .border-emerald-200, .theme-dark .border-red-200,
+.theme-dark .border-amber-200, .theme-dark .border-amber-300,
+.theme-dark .border-sky-100 { border-color: #3f3f46 !important; }
+.theme-dark .bg-emerald-50, .theme-dark .bg-emerald-100,
+.theme-dark .bg-emerald-50\/50 { background-color: #15372d !important; }
+.theme-dark .text-emerald-900, .theme-dark .text-emerald-800,
+.theme-dark .text-emerald-700 { color: #a7f3d0 !important; }
+.theme-dark .bg-amber-50, .theme-dark .bg-amber-100 { background-color: #3b3020 !important; }
+.theme-dark .text-amber-800, .theme-dark .text-amber-700 { color: #fde68a !important; }
+.theme-dark .bg-red-50, .theme-dark .bg-red-100 { background-color: #3c2023 !important; }
+.theme-dark .text-red-800, .theme-dark .text-red-700 { color: #fca5a5 !important; }
+/* La tarjeta de modelo Keras conserva significado de éxito sin brillar en oscuro. */
+.theme-dark .saved-model-card { background-color: #16382e !important; border-color: #225a46 !important; }
+.theme-dark .saved-model-card, .theme-dark .saved-model-card strong { color: #b6f7d8 !important; }
+
+.theme-dark .welcome-primary-cta { background: #e4e4e7 !important; color: #18181b !important; }
