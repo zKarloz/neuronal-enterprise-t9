@@ -1,2 +1,2 @@
-// API pública del módulo reports; evita imports directos desde el shell.
-export { default } from './Reports';
+// M09: selector entre reportes del navegador y del servidor.
+export { default } from './ReportsHub';

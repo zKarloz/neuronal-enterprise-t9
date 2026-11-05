@@ -437,3 +437,105 @@ def test_cnn_preparation_rejects_disordered_pixels():
     prep["features"][0]["name"] = "pixel_0"
     prep["task"] = "regression"
     assert validate_cnn_preparation(prep)
+
+# v0.10: M08/M09. Se usan binarios de prueba para verificar permisos e integridad,
+# nunca se presentan como un modelo neuronal real ni como métricas reales.
+def test_authorized_model_artifact_download_and_checksum(lab):
+    from hashlib import sha256
+    client, eng, state = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    content = b"contenido de prueba (no es un modelo Keras)"
+    with Session(eng) as db:
+        item = db.get(TrainingJob, UUID(job["id"]))
+        item.status = "COMPLETED"
+        model = ModelVersion(project_id=UUID(pid), job_id=item.id,
+            storage_key=f"{pid}/{job['id']}.keras", sha256=sha256(content).hexdigest(),
+            test_metrics={"accuracy": 0.6}, name="Modelo de integración")
+        db.add(model)
+        db.commit()
+        model_id = str(model.id)
+    class FakeStorage:
+        async def read_model(self, _key):
+            return content
+    app.dependency_overrides[get_storage] = lambda: FakeStorage()
+    target = f"/api/v1/projects/{pid}/models/{model_id}/artifact"
+    response = client.get(target)
+    assert response.status_code == 200 and response.content == content
+    assert response.headers["content-disposition"].endswith('.keras"')
+    assert response.headers["cache-control"] == "private, no-store"
+    with Session(eng) as db:
+        from app.models.entities import AuditEvent
+        assert db.query(AuditEvent).filter_by(action="model.downloaded").count() == 1
+    state["identity"] = Identity(uuid4(), "stranger@example.org")
+    assert client.get(target).status_code == 404
+
+
+def test_model_artifact_rejects_corruption_and_wrong_project(lab):
+    client, eng, state = lab
+    owner = state["identity"]
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    with Session(eng) as db:
+        item = db.get(TrainingJob, UUID(job["id"]))
+        item.status = "COMPLETED"
+        model = ModelVersion(project_id=UUID(pid), job_id=item.id,
+            storage_key=f"{pid}/{job['id']}.keras", sha256="f" * 64,
+            test_metrics={}, name="Modelo corrupto")
+        db.add(model); db.commit(); model_id = str(model.id)
+    class CorruptedStorage:
+        async def read_model(self, _key): return b"otro contenido"
+    app.dependency_overrides[get_storage] = lambda: CorruptedStorage()
+    url = f"/api/v1/projects/{pid}/models/{model_id}/artifact"
+    assert client.get(url).status_code == 502
+    second = client.post("/api/v1/projects", json={"name": "Segundo proyecto"}).json()
+    assert client.get(f"/api/v1/projects/{second['id']}/models/{model_id}/artifact").status_code == 404
+    assert state["identity"] == owner
+
+
+def test_reports_csv_pdf_summary_and_isolation(lab):
+    from app.models.entities import ArchitectureRecord, AuditEvent
+    client, eng, state = lab
+    pid, aid, did = setup(lab)
+    job = submit(client, pid, aid, did).json()
+    with Session(eng) as db:
+        architecture = db.get(ArchitectureRecord, UUID(aid))
+        architecture.name = '=SUM(1,2)'  # Defender CSV contra inyección de fórmulas.
+        j = db.get(TrainingJob, UUID(job["id"]))
+        j.status = "COMPLETED"; j.epoch = 2
+        db.add(TrainingMetric(job_id=j.id, epoch=1, loss=0.9, val_loss=1.0, accuracy=0.6))
+        db.add(TrainingMetric(job_id=j.id, epoch=2, loss=0.7, val_loss=0.8, accuracy=0.7))
+        db.commit()
+    route = f"/api/v1/projects/{pid}/reports"
+    summary = client.get(f"{route}/summary")
+    assert summary.status_code == 200, summary.text
+    data = summary.json()
+    assert data["project"]["id"] == pid
+    assert len(data["jobs"]) == 1 and len(data["architectures"]) == 1
+    assert not any("storage_key" in str(item) for item in data.values())
+    csv_result = client.get(f"{route}/epochs.csv")
+    assert csv_result.status_code == 200
+    assert csv_result.headers["content-type"].startswith("text/csv")
+    assert "'=SUM(1,2)" in csv_result.text
+    assert len(csv_result.text.splitlines()) == 3
+    pdf = client.get(f"{route}/project.pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF-")
+    assert pdf.headers["cache-control"] == "private, no-store"
+    with Session(eng) as db:
+        assert db.query(AuditEvent).filter_by(action="report.csv_exported").count() == 1
+        assert db.query(AuditEvent).filter_by(action="report.pdf_exported").count() == 1
+    state["identity"] = Identity(uuid4(), "stranger@example.org")
+    for path in ("/summary", "/epochs.csv", "/project.pdf"):
+        assert client.get(route + path).status_code == 404
+
+
+def test_pdf_markup_is_escaped():
+    from app.api.reports import make_pdf, csv_safe
+    assert csv_safe(' =HYPERLINK("x")').startswith("'")
+    assert csv_safe("value") == "value"
+    content = make_pdf({
+        "generated_at": "2026-11-05T00:00:00+00:00",
+        "project": {"name": "<b>Nombre sin etiquetas</b>", "description": "<img src=\"x\"/>"},
+        "jobs": [], "datasets": [], "architectures": [], "models": [],
+    })
+    assert content.startswith(b"%PDF-")

@@ -6,6 +6,7 @@
 import { request } from './client';
 
 const STORAGE_KEY = 'neurolab-remote-session-v1';
+export const SESSION_CHANGED = 'neurolab:session-changed';
 
 interface TokenResponse {
   access_token: string;
@@ -50,10 +51,12 @@ export function loadSession(): RemoteSession | null {
 
 export function saveSession(session: RemoteSession): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  window.dispatchEvent(new Event(SESSION_CHANGED));
 }
 
 export function clearSession(): void {
   sessionStorage.removeItem(STORAGE_KEY);
+  window.dispatchEvent(new Event(SESSION_CHANGED));
 }
 
 export async function sendOtp(email: string): Promise<void> {

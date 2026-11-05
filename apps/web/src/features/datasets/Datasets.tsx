@@ -1,14 +1,14 @@
 // Importación de CSV validada en el navegador, sin enviar archivos a una API.
 import { useRef, useState } from 'react';
 import { useUrlMode } from '../../app/useUrlMode';
-import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Trash2, UploadCloud, Image, ScanLine, HardDrive, Cloud } from 'lucide-react';
+import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Trash2, UploadCloud, Image, ScanLine } from 'lucide-react';
 import RemoteDatasets from './RemoteDatasets';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { MAX_CSV_BYTES, datasetSummary, parseCsv } from '../../lib/csv';
 import { isDigitsDataset, MAX_DIGITS_CSV_BYTES, parseDigitsCsv } from '../../lib/digits';
 import DigitPreview from '../../components/DigitPreview';
 import { download } from '../../lib/storage';
-import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
+import { EmptyState, Heading, Notice, SectionTitle, ModeTabs, formatDate } from '../../components/ui';
 import type { Page } from '../../app/App';
 
 function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
@@ -90,10 +90,7 @@ function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
 export default function Datasets({ navigate }: { navigate: (page: Page) => void }) {
   const [mode, setMode] = useUrlMode();
   return <>
-    <div className="mb-5 inline-flex gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Almacenamiento de datasets">
-      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode === 'local' ? 'bg-primary-50 text-primary-700' : 'text-slate-500'}`} onClick={() => setMode('local')}><HardDrive size={15}/> Navegador</button>
-      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode === 'server' ? 'bg-primary-50 text-primary-700' : 'text-slate-500'}`} onClick={() => setMode('server')}><Cloud size={15}/> Servidor</button>
-    </div>
+    <ModeTabs mode={mode} setMode={setMode} label="Almacenamiento de datasets"/>
     {mode === 'local' ? <LocalDatasets navigate={navigate}/> : <RemoteDatasets navigate={navigate}/>}
   </>;
 }

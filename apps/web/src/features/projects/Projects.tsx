@@ -1,11 +1,10 @@
 // Operaciones locales de creación, edición, filtrado y archivo de proyectos.
 import { useMemo, useState } from 'react';
-import {Cloud,HardDrive} from 'lucide-react';
 import {RemoteProjects} from './RemoteProjects';
 import { useUrlMode } from '../../app/useUrlMode';
 import { Archive, CheckCircle2, CirclePlus, FolderKanban, Pencil, Search, Trash2, Undo2 } from 'lucide-react';
 import { useWorkspace } from '../../app/WorkspaceProvider';
-import { EmptyState, Heading, Modal, Notice, StatusPill, formatDate } from '../../components/ui';
+import { EmptyState, Heading, Modal, Notice, StatusPill, ModeTabs, formatDate } from '../../components/ui';
 import type { Project } from '../../types/domain';
 
 export function ProjectModal({ onClose, editing }: { onClose: () => void; editing?: Project }) {
@@ -42,10 +41,7 @@ export default function Projects({ onNewProject }: { onNewProject: () => void })
     try { deleteProject(p.id); } catch (err) { setError((err as Error).message); }
   };
   return <>
-    <div className="mb-5 inline-flex gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Tipo de almacenamiento">
-      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode==='local'?'bg-primary-50 text-primary-700':'text-slate-500'}`} onClick={()=>setMode('local')}><HardDrive size={15}/> Navegador</button>
-      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode==='server'?'bg-primary-50 text-primary-700':'text-slate-500'}`} onClick={()=>setMode('server')}><Cloud size={15}/> Servidor</button>
-    </div>
+    <ModeTabs mode={mode} setMode={setMode} label="Almacenamiento de proyectos"/>
     {mode==='server'?<RemoteProjects/>:<>
     <Heading eyebrow="Gestión · M02" title="Proyectos de IA" description="Organiza las investigaciones y conserva su historial en el almacenamiento local del navegador." action={<button onClick={onNewProject} className="btn-primary"><CirclePlus size={17}/> Crear proyecto</button>}/>
     {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
