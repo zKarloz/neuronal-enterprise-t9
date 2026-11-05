@@ -1,12 +1,12 @@
 /** M06 híbrido: conserva intacto el motor local y habilita la ejecución remota. */
-import { useState } from 'react';
+import { useUrlMode } from '../../app/useUrlMode';
 import { Cloud, HardDrive } from 'lucide-react';
 import LocalTraining from './Training';
 import RemoteTraining from './RemoteTraining';
 import type { Page } from '../../app/App';
 
 export default function TrainingHub({ navigate }: { navigate: (page: Page) => void }) {
-  const [mode, setMode] = useState<'local' | 'server'>('local');
+  const [mode, setMode] = useUrlMode();
   return <>
     <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label="Modo de entrenamiento">
       <button type="button" className={mode === 'local' ? 'btn-primary' : 'btn-outline'} aria-pressed={mode === 'local'} onClick={() => setMode('local')}><HardDrive size={16}/> Navegador</button>

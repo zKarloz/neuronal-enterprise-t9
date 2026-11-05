@@ -45,6 +45,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [patience, setPatience] = useState(3);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Fallos recuperables de sincronización: no contradicen un trabajo ya completado.
+  const [syncError, setSyncError] = useState('');
   const [notice, setNotice] = useState('');
   const [transport, setTransport] = useState<'connecting' | 'live' | 'rest' | 'done'>('connecting');
   const selectedJob = jobs.find(job => job.id === jobId);
@@ -80,6 +82,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
       getArchitectures(project, access), getJobs(project, access), getModels(project, access),
     ]);
     setDatasets(ds); setArchitectures(arch); setJobs(runs); setModels(saved);
+    setSyncError('');
     setDatasetId(old => ds.some(item => item.id === old) ? old : (ds.find(item => item.prep_json)?.id ?? ''));
     setArchitectureId(old => arch.some(item => item.id === old) ? old : (arch[0]?.id ?? ''));
     setJobId(old => runs.some(job => job.id === old) ? old : (runs[0]?.id ?? ''));
@@ -89,14 +92,15 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     let alive = true;
     if (!configured || !loadSession()) return;
     void token().then(access => request<RemoteProject[]>('/projects', access)).then(rows => {
-      if (alive) { setProjects(rows); setProjectId(rows[0]?.id ?? ''); }
-    }).catch(err => { if (alive) setError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); });
+      if (alive) { setProjects(rows); setProjectId(rows[0]?.id ?? ''); setSyncError(''); }
+    }).catch(err => { if (alive) setSyncError(err instanceof Error ? err.message : 'Error al consultar proyectos.'); });
     return () => { alive = false; };
   }, [token]);
   useEffect(() => {
     setDatasets([]); setArchitectures([]); setJobs([]); setMetricsByJob({}); setModels([]);
+    setSyncError('');
     if (!projectId) return;
-    void refresh(projectId).catch(err => setError(err instanceof Error ? err.message : 'Error de conexión.'));
+    void refresh(projectId).catch(err => setSyncError(err instanceof Error ? err.message : 'Error de conexión.'));
   }, [projectId, refresh]);
 
   // SSE acelera el monitor. REST sigue disponible si una red/proxy corta el stream.
@@ -121,6 +125,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
             if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(snapshot.job.status)) {
               finished = true;
               setTransport('done');
+              setNotice(old => /^(Trabajo encolado|Reintento creado)/.test(old) ? '' : old);
             }
           });
           if (finished || !active) break;
@@ -141,7 +146,7 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     if (!projectId) return;
     let active = true;
     const interval = window.setInterval(() => {
-      void refresh(projectId).catch(err => { if (active) setError(err instanceof Error ? err.message : 'Error al actualizar.'); });
+      void refresh(projectId).catch(err => { if (active) setSyncError(err instanceof Error ? err.message : 'Error al actualizar.'); });
     }, transport === 'live' ? 30000 : 8000);
     return () => { active = false; window.clearInterval(interval); };
   }, [projectId, refresh, transport]);
@@ -150,9 +155,16 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     let active = true;
     void token().then(access => getMetrics(projectId, access, jobId)).then(rows => {
       if (active) storeMetrics(jobId, rows);
-    }).catch(err => { if (active) setError(err instanceof Error ? err.message : 'No se pudieron leer métricas.'); });
+    }).catch(err => { if (active) setSyncError(err instanceof Error ? err.message : 'No se pudieron leer métricas.'); });
     return () => { active = false; };
   }, [projectId, jobId, selectedJob?.epoch, token, storeMetrics]);
+
+  // Si el polling detecta RUNNING/COMPLETED, retirar el aviso de encolado aunque SSE se corte.
+  useEffect(() => {
+    if (selectedJob && !['QUEUED', 'PREPARING'].includes(selectedJob.status)) {
+      setNotice(old => /^(Trabajo encolado|Reintento creado)/.test(old) ? '' : old);
+    }
+  }, [selectedJob?.id, selectedJob?.status]);
 
   async function action(work: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
@@ -169,9 +181,11 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   return <div className="space-y-5">
     <Heading eyebrow="Experimentación · M06 · Servidor" title="Entrenamiento neuronal remoto"
       description="Redes Feedforward y CNN 8×8 versionadas. TensorFlow/Keras se ejecuta en un worker Python; SSE muestra las métricas reales."/>
-    <Notice tone="warning">Para empezar un trabajo debes mantener el worker Python ejecutándose en tu equipo. Los trabajos en cola permanecen guardados aunque cierres el navegador.</Notice>
-    {error && <Notice tone="error">{error}</Notice>}
-    {notice && <Notice tone="success">{notice}</Notice>}
+    <p className="text-xs leading-5 text-slate-500">El worker Python debe estar encendido para procesar trabajos; las ejecuciones pendientes se conservan aunque cierres el navegador.</p>
+    {error && <Notice tone="error">{error} <button className="ml-2 underline" onClick={() => setError('')}>Cerrar</button></Notice>}
+    {syncError && transport !== 'live' && !['COMPLETED', 'CANCELLED'].includes(selectedJob?.status ?? '') &&
+      <Notice tone="warning">Sincronización temporalmente interrumpida. El trabajo sigue guardado en PostgreSQL; se intentará reconectar. <button className="ml-2 underline" onClick={() => setSyncError('')}>Ocultar</button></Notice>}
+    {notice && <Notice tone="success">{notice} <button className="ml-2 underline" onClick={() => setNotice('')}>Cerrar</button></Notice>}
     <section className="panel flex flex-wrap items-end gap-3 p-5">
       <div className="min-w-[220px] flex-1"><label className="field-label" htmlFor="remote-training-project">Proyecto remoto</label><select id="remote-training-project" className="field" value={projectId} onChange={e => setProjectId(e.target.value)}>
         {!projects.length && <option value="">Sin proyectos</option>}{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -241,7 +255,12 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
           {incompatibleCnn && <Notice tone="warning">Para entrenar esta CNN, prepara un CSV de 64 píxeles numéricos (pixel_0 a pixel_63), columna objetivo label y tarea Clasificación.</Notice>}
           <button className="btn-primary w-full" disabled={busy || incompatibleCnn || !datasetId || !architectureId || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
             const item = await startJob(projectId, await token(), { architecture_id: architectureId, dataset_id: datasetId, epochs, batch_size: batchSize, learning_rate: rate, seed, early_stopping_patience: earlyStop ? patience : 0 });
-            await refresh(projectId); setJobId(item.id); setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
+            // Encolar ya devolvió 202: un GET posterior fallido no deshace el trabajo.
+            setJobs(current => [item, ...current.filter(job => job.id !== item.id)]);
+            setJobId(item.id);
+            setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
+            try { await refresh(projectId); }
+            catch (err) { setSyncError(err instanceof Error ? err.message : 'Sincronización pendiente.'); }
           })}>{busy ? <Loader2 size={17} className="animate-spin"/> : <Plus size={17}/>} Encolar entrenamiento</button>
         </section>
       </div>
@@ -258,8 +277,11 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
           <div className="flex flex-wrap items-center justify-between gap-3"><div><strong className="text-sm text-ink">{STATES[selectedJob.status]}</strong><p className="text-xs text-slate-500">Época {selectedJob.epoch} de {selectedJob.epochs}{selectedJob.cancel_requested ? ' · Cancelación solicitada' : ''}</p></div>
             {['FAILED', 'CANCELLED'].includes(selectedJob.status) && <button className="btn-outline" disabled={busy || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
               const job = await retryJob(projectId, await token(), selectedJob.id);
-              await refresh(projectId); setJobId(job.id);
+              setJobs(current => [job, ...current.filter(item => item.id !== job.id)]);
+              setJobId(job.id);
               setNotice('Reintento creado como nueva ejecución. El historial anterior permanece disponible.');
+              try { await refresh(projectId); }
+              catch (err) { setSyncError(err instanceof Error ? err.message : 'Sincronización pendiente.'); }
             })}><RotateCcw size={16}/> Reintentar trabajo</button>}
             {['QUEUED', 'PREPARING', 'RUNNING'].includes(selectedJob.status) && <button className="btn-outline" disabled={busy || selectedJob.cancel_requested} onClick={() => void action(async () => { await cancelJob(projectId, await token(), selectedJob.id); await refresh(projectId); })}><Ban size={16}/> Solicitar cancelación</button>}</div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-primary-500 transition-all" style={{ width: `${selectedJob.progress}%` }}/></div>

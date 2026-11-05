@@ -1,8 +1,8 @@
-# NeuroLab Enterprise v0.9.0 — CNN remota de imágenes 8×8
+# NeuroLab Enterprise v0.9.1 — Conectividad, avisos y navegación persistente
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
-**Nuevo en v0.9.0:** M05 admite hasta 65 columnas CSV; M06 permite arquitecturas remotas Feedforward y CNN 8×8. Las CNN procesan 64 píxeles numéricos (`pixel_0`...`pixel_63`) y una etiqueta, con Conv2D + MaxPooling + Dense. El worker registra métricas por época mediante PostgreSQL y SSE, aplica Early Stopping y guarda el `.keras` privado.
+**Base v0.9.0:** M05 admite hasta 65 columnas CSV; M06 permite arquitecturas remotas Feedforward y CNN 8×8. Las CNN procesan 64 píxeles numéricos (`pixel_0`...`pixel_63`) y una etiqueta, con Conv2D + MaxPooling + Dense. El worker registra métricas por época mediante PostgreSQL y SSE, aplica Early Stopping y guarda el `.keras` privado.
 
 - Se mantienen los 10 módulos, TensorFlow.js local, Feedforward remoto, SSE y gráficas en vivo, reintentos y registro de modelos.
 - **No requiere migración adicional** a `005_registry_early_stopping`, ni buckets o credenciales nuevas.
@@ -11,3 +11,13 @@ Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supab
 - Dataset público incluido: `apps/web/public/datasets/digits-8x8.csv` (UCI, 1797 imágenes, 65 columnas).
 
 Lee `INSTRUCCIONES_PARCHE_V090.md` y `docs/operations/CNN_REMOTA_V090.md`.
+
+## Mantenimiento v0.9.1
+
+- **CORS:** FastAPI queda envuelto por el middleware CORS exterior, incluyendo respuestas HTTP 500. Se mantiene la lista explícita `FRONTEND_ORIGINS`; un 502 del proveedor no puede corregirse desde FastAPI.
+- **M06:** los errores temporales de sincronización se separan de los resultados persistidos, el aviso de encolado se retira cuando el trabajo avanza y las recomendaciones del worker dejan de mostrarse como alerta.
+- **Navegación:** los diez módulos tienen URLs propias; la pestaña `Servidor` se conserva en `?vista=servidor`. Compatible con recarga y navegación Atrás/Adelante.
+- **Vercel:** `apps/web/vercel.json` aplica la reescritura SPA para abrir rutas directamente.
+- **Sin cambios en PostgreSQL, jobs, modelos, worker ni buckets.** La migración sigue en `005_registry_early_stopping`.
+
+Consulta `INSTRUCCIONES_PARCHE_V091.md` y `docs/operations/CORS_AVISOS_NAVEGACION_V091.md`.

@@ -11,21 +11,42 @@ from app.api.authentication import router as authentication_router
 from app.api.google_oauth import router as google_oauth_router
 from app.api.datasets import router as datasets_router
 from app.api.training import router as training_router
-app=FastAPI(title="NeuroLab Enterprise",version="0.9.0")
-app.add_middleware(CORSMiddleware,allow_origins=settings().origins,allow_credentials=False,allow_methods=["GET","POST","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type"])
-@app.get("/api/v1/health")
-def health():return {"status":"ok","version":"0.9.0"}
-@app.get("/api/v1/ready")
+api = FastAPI(title="NeuroLab Enterprise", version="0.9.1")
+
+
+class PublicCORS(CORSMiddleware):
+    """CORS externo: incluso los errores 500 incluyen la cabecera de origen.
+
+    Conservar dependency_overrides para las pruebas y los integradores de FastAPI.
+    Nunca usar `*` con orígenes desconocidos en producción.
+    """
+    @property
+    def dependency_overrides(self):
+        return self.app.dependency_overrides
+
+@api.get("/api/v1/health")
+def health():return {"status":"ok","version":"0.9.1"}
+@api.get("/api/v1/ready")
 def ready(db:Session=Depends(get_db)):
     try: db.execute(text("SELECT 1"))
     except Exception: raise HTTPException(503,"PostgreSQL no disponible") from None
     return {"status":"ready"}
-@app.get("/api/v1/me")
+@api.get("/api/v1/me")
 def me(identity:Identity=Depends(current_user)):return {"id":identity.id,"email":identity.email}
-app.include_router(router,prefix="/api/v1")
-app.include_router(authentication_router,prefix="/api/v1")
-app.include_router(google_oauth_router,prefix="/api/v1")
+api.include_router(router,prefix="/api/v1")
+api.include_router(authentication_router,prefix="/api/v1")
+api.include_router(google_oauth_router,prefix="/api/v1")
 
-app.include_router(datasets_router,prefix="/api/v1")
+api.include_router(datasets_router,prefix="/api/v1")
 
-app.include_router(training_router,prefix="/api/v1")
+api.include_router(training_router,prefix="/api/v1")
+
+# Envoltura exterior recomendada por Starlette: el 500 de ServerErrorMiddleware
+# pasa igualmente por CORS, evitando errores ambiguos en el navegador.
+app = PublicCORS(
+    app=api,
+    allow_origins=settings().origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)

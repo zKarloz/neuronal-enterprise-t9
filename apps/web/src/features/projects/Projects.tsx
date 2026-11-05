@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import {Cloud,HardDrive} from 'lucide-react';
 import {RemoteProjects} from './RemoteProjects';
-import { hasGoogleReturn } from '../../lib/api/google-oauth';
+import { useUrlMode } from '../../app/useUrlMode';
 import { Archive, CheckCircle2, CirclePlus, FolderKanban, Pencil, Search, Trash2, Undo2 } from 'lucide-react';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { EmptyState, Heading, Modal, Notice, StatusPill, formatDate } from '../../components/ui';
@@ -31,7 +31,7 @@ export function ProjectModal({ onClose, editing }: { onClose: () => void; editin
 
 export default function Projects({ onNewProject }: { onNewProject: () => void }) {
   const { data, activeProject, selectProject, editProject, deleteProject } = useWorkspace();
-  const [mode,setMode]=useState<'local'|'remote'>(() => hasGoogleReturn() ? 'remote' : 'local');
+  const [mode,setMode]=useUrlMode(true);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'archived'>('all');
   const [edit, setEdit] = useState<Project | null>(null);
@@ -44,9 +44,9 @@ export default function Projects({ onNewProject }: { onNewProject: () => void })
   return <>
     <div className="mb-5 inline-flex gap-1 rounded-xl border border-slate-200 bg-white p-1" role="group" aria-label="Tipo de almacenamiento">
       <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode==='local'?'bg-primary-50 text-primary-700':'text-slate-500'}`} onClick={()=>setMode('local')}><HardDrive size={15}/> Navegador</button>
-      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode==='remote'?'bg-primary-50 text-primary-700':'text-slate-500'}`} onClick={()=>setMode('remote')}><Cloud size={15}/> Servidor</button>
+      <button className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold ${mode==='server'?'bg-primary-50 text-primary-700':'text-slate-500'}`} onClick={()=>setMode('server')}><Cloud size={15}/> Servidor</button>
     </div>
-    {mode==='remote'?<RemoteProjects/>:<>
+    {mode==='server'?<RemoteProjects/>:<>
     <Heading eyebrow="Gestión · M02" title="Proyectos de IA" description="Organiza las investigaciones y conserva su historial en el almacenamiento local del navegador." action={<button onClick={onNewProject} className="btn-primary"><CirclePlus size={17}/> Crear proyecto</button>}/>
     {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
     <div className="panel mb-5 flex flex-wrap items-center gap-3 p-4"><div className="relative min-w-[220px] flex-1"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="field pl-10" placeholder="Buscar proyectos..." value={query} onChange={e => setQuery(e.target.value)}/></div><div className="flex rounded-xl bg-slate-100 p-1">{(['all','active','archived'] as const).map(key => <button key={key} className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${filter === key ? 'bg-white text-ink shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} onClick={() => setFilter(key)}>{key === 'all' ? 'Todos' : key === 'active' ? 'Activos' : 'Archivados'}</button>)}</div></div>
