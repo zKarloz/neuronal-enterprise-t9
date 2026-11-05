@@ -6,10 +6,11 @@ trabajos desde PostgreSQL. El usuario ve solo recursos de sus proyectos.
 from datetime import datetime, timezone
 import asyncio
 import json
+import hashlib
 import time
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Literal
@@ -20,6 +21,7 @@ from app.api.projects import editor, one
 from app.services.cnn_validation import validate_cnn_preparation
 from app.core.auth import Identity, current_user
 from app.core.database import get_db
+from app.services.storage import PrivateStorage, get_storage
 from app.models.entities import (
     ArchitectureRecord, AuditEvent, DatasetRecord, ModelVersion, Project, TrainingJob, TrainingMetric,
 )
@@ -350,6 +352,32 @@ def list_models(project_id: UUID, identity: Identity = Depends(current_user), db
     one(db, project_id, identity)
     return db.scalars(select(ModelVersion).where(ModelVersion.project_id == project_id)
                       .order_by(ModelVersion.created_at.desc())).all()
+
+
+@router.get("/models/{model_id}/artifact")
+async def download_model(project_id: UUID, model_id: UUID,
+                         identity: Identity = Depends(current_user),
+                         db: Session = Depends(get_db),
+                         storage: PrivateStorage = Depends(get_storage)):
+    """M08: descarga autorizada; verifica SHA-256 antes de entregar el binario.
+
+    Un modelo de otro proyecto devuelve 404 sin revelar su existencia.
+    """
+    one(db, project_id, identity)
+    model = db.scalar(select(ModelVersion).where(
+        ModelVersion.id == model_id, ModelVersion.project_id == project_id))
+    if model is None:
+        raise HTTPException(404, "Modelo no encontrado.")
+    content = await storage.read_model(model.storage_key)
+    if hashlib.sha256(content).hexdigest() != model.sha256:
+        raise HTTPException(502, "El archivo no coincide con su huella de integridad.")
+    db.add(AuditEvent(actor_id=identity.id, project_id=project_id, action="model.downloaded"))
+    db.commit()
+    return Response(content=content, media_type="application/octet-stream", headers={
+        "Content-Disposition": f'attachment; filename="neurolab-model-{model.id}.keras"',
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    })
 
 
 class ModelUpdate(BaseModel):

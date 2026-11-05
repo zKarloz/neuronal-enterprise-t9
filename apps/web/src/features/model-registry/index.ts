@@ -1,2 +1,2 @@
-// API pública del módulo model-registry; evita imports directos desde el shell.
-export { default } from './Models';
+// M08 híbrido: entrada estable para el shell.
+export { default } from './ModelsHub';

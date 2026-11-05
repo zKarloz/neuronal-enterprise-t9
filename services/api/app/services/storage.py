@@ -40,6 +40,31 @@ class PrivateStorage:
         except httpx.HTTPError:
             raise HTTPException(503, "Storage no respondió al guardar el modelo.") from None
 
+    async def read_model(self, key: str) -> bytes:
+        """Descarga privada y acotada de un artefacto Keras para un usuario autorizado.
+
+        La API valida permisos antes de llamar a este método. Nunca se devuelve
+        una URL firmada ni se envía la clave de Supabase al navegador.
+        """
+        bucket = settings().model_bucket
+        target = self.endpoint + "authenticated/" + quote(bucket, safe="") + "/" + quote(key, safe="/")
+        max_bytes = 50 * 1024 * 1024
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                async with client.stream("GET", target, headers=self.headers) as result:
+                    if result.status_code != 200:
+                        raise HTTPException(502, "No se pudo recuperar el modelo privado.")
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in result.aiter_bytes():
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise HTTPException(413, "El modelo supera el límite de descarga de 50 MB.")
+                        chunks.append(chunk)
+                    return b"".join(chunks)
+        except httpx.HTTPError:
+            raise HTTPException(503, "Storage no respondió al recuperar el modelo.") from None
+
     async def upload(self, key: str, content: bytes) -> None:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:

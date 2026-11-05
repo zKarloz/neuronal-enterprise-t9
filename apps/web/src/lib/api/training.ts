@@ -1,5 +1,5 @@
 /** Tipos de M04/M06; transportados exclusivamente por nuestra API FastAPI. */
-import { request } from './client';
+import { downloadPrivate, request } from './client';
 import { apiUrl } from './config';
 
 export interface DenseLayer { units: number; activation: 'relu' | 'tanh' | 'sigmoid' }
@@ -39,6 +39,10 @@ export const getMetrics = (p: string, t: string, id: string) => request<EpochMet
 export const getModels = (p: string, t: string) => request<RemoteModel[]>(`${base(p)}/models`, t);
 export const updateModel = (p: string, t: string, id: string, data: { name?: string; notes?: string; stage?: ModelStage }) =>
   request<RemoteModel>(`${base(p)}/models/${id}`, t, 'PATCH', data);
+
+/** M08: archivo Keras privado; el servidor verifica permiso y SHA-256. */
+export const downloadModel = (p: string, t: string, id: string) =>
+  downloadPrivate(`${base(p)}/models/${id}/artifact`, t, `neurolab-model-${id}.keras`);
 
 
 /** El stream usa fetch porque EventSource no permite cabeceras Authorization. */

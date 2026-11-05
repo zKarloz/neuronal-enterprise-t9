@@ -1,16 +1,29 @@
 // Biblioteca de componentes compartidos de interfaz enterprise.
 import type { ReactNode } from 'react';
-import { ArrowRight, CircleAlert, Inbox, X } from 'lucide-react';
+import { ArrowRight, CircleAlert, Cloud, HardDrive, Inbox, X } from 'lucide-react';
 
 /** Componentes presentacionales comunes para mantener uniformidad visual. */
-export function Heading({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
+export function Heading({ title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
   return <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
     <div className="max-w-2xl">
-      {eyebrow && <div className="eyebrow mb-2">{eyebrow}</div>}
+      {/* Se conserva la prop por compatibilidad; el shell ya muestra el contexto.
+          No duplicar etiquetas como "Documentación · M09" en cada página. */}
       <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-[28px]">{title}</h1>
       {description && <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>}
     </div>
     {action}
+  </div>;
+}
+
+/** Pestañas de modo comunes a M02/M05/M06/M07/M08/M09. */
+export function ModeTabs({ mode, setMode, label = 'Origen de datos' }: {
+  mode: 'local' | 'server'; setMode: (mode: 'local' | 'server') => void; label?: string;
+}) {
+  return <div className="mb-5 flex flex-wrap gap-2" role="group" aria-label={label}>
+    <button type="button" className={mode === 'local' ? 'btn-primary' : 'btn-outline'}
+      aria-pressed={mode === 'local'} onClick={() => setMode('local')}><HardDrive size={16}/> Navegador</button>
+    <button type="button" className={mode === 'server' ? 'btn-primary' : 'btn-outline'}
+      aria-pressed={mode === 'server'} onClick={() => setMode('server')}><Cloud size={16}/> Servidor</button>
   </div>;
 }
 export function EmptyState({ icon, title, description, action, compact = false }: { icon?: ReactNode; title: string; description: string; action?: ReactNode; compact?: boolean }) {
