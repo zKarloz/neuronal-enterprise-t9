@@ -17,7 +17,7 @@ from typing import Any
 
 MAX_CSV_BYTES = 5 * 1024 * 1024
 MAX_ROWS = 20_000
-MAX_COLUMNS = 64
+MAX_COLUMNS = 65
 PREVIEW_ROWS = 8
 PIPELINE_VERSION = 1
 
@@ -46,7 +46,7 @@ def inspect_csv(raw: bytes) -> dict[str, Any]:
         header = next(rows)
         headers = [v.strip() for v in header]
         if not (2 <= len(headers) <= MAX_COLUMNS):
-            raise CSVValidationError("Se requieren entre 2 y 64 columnas.")
+            raise CSVValidationError("Se requieren entre 2 y 65 columnas.")
         if any(not h or len(h) > 100 for h in headers) or len(set(h.casefold() for h in headers)) != len(headers):
             raise CSVValidationError("Los encabezados deben ser únicos, no vacíos y de hasta 100 caracteres.")
         records: list[list[str]] = []

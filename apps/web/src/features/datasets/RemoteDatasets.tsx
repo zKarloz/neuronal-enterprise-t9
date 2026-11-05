@@ -112,7 +112,7 @@ export default function RemoteDatasets({ navigate }: { navigate: (page: Page) =>
     {!projectId ? <div className="panel p-6"><EmptyState icon={<Database size={27}/>} title="Crea un proyecto remoto primero" description="Los datasets remotos siempre pertenecen a un proyecto autorizado." action={<button className="btn-primary" onClick={() => navigate('projects')}>Crear proyecto en M02</button>}/></div> : <>
       <section className="panel p-5">
         <h2 className="mb-1 text-base font-bold text-ink">Importar CSV al servidor</h2>
-        <p className="mb-4 text-xs leading-5 text-slate-500">UTF-8 · Hasta 5 MB · 20.000 registros · 64 columnas. Encabezados únicos. Archivos almacenados en privado, no en el disco temporal de Render.</p>
+        <p className="mb-4 text-xs leading-5 text-slate-500">UTF-8 · Hasta 5 MB · 20.000 registros · 65 columnas (64 píxeles + etiqueta para CNN). Encabezados únicos. Archivos almacenados en privado, no en el disco temporal de Render.</p>
         <input ref={inputRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={event => setFile(event.target.files?.[0] ?? null)}/>
         <div className="flex flex-wrap items-center gap-3">
           <button className="btn-outline" type="button" disabled={busy} onClick={() => inputRef.current?.click()}><FileSpreadsheet size={17}/> Elegir CSV</button>

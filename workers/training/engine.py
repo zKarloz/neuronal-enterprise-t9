@@ -26,6 +26,7 @@ from app.core.database import engine
 from app.core.config import settings
 from app.models.entities import DatasetRecord, ModelVersion, TrainingJob, TrainingMetric
 from app.services.csv_pipeline import _all_rows, _number
+from app.services.cnn_validation import validate_cnn_preparation
 from app.services.storage import PrivateStorage
 
 LOGGER = logging.getLogger("neurolab.worker")
@@ -163,9 +164,25 @@ def make_model(prep: dict, config: dict, rate: float, seed: int):
     """Importación diferida: la API de Render no necesita TensorFlow instalado."""
     import tensorflow as tf
     tf.keras.utils.set_random_seed(seed)
-    model = tf.keras.Sequential([tf.keras.Input(shape=(prep["input_dimensions"],))])
-    for layer in config["layers"]:
-        model.add(tf.keras.layers.Dense(int(layer["units"]), activation=layer["activation"]))
+    if config.get("family", "feedforward") == "cnn_8x8":
+        error = validate_cnn_preparation(prep)
+        if error:
+            raise ValueError(error)
+        # Red pequeña en CPU para imágenes 8×8. Los píxeles ya se han escalado
+        # con las estadísticas EXCLUSIVAS del train registradas por M05.
+        model = tf.keras.Sequential([
+            tf.keras.Input(shape=(8, 8, 1)),
+            tf.keras.layers.Conv2D(int(config["conv_filters"]),
+                                   kernel_size=int(config["kernel_size"]),
+                                   activation="relu", padding="same"),
+            tf.keras.layers.MaxPooling2D(pool_size=(2, 2)),
+            tf.keras.layers.Flatten(),
+            tf.keras.layers.Dense(int(config["dense_units"]), activation="relu"),
+        ])
+    else:
+        model = tf.keras.Sequential([tf.keras.Input(shape=(prep["input_dimensions"],))])
+        for layer in config["layers"]:
+            model.add(tf.keras.layers.Dense(int(layer["units"]), activation=layer["activation"]))
     if prep["task"] == "classification":
         model.add(tf.keras.layers.Dense(len(prep["classes"]), activation="softmax"))
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=rate),
@@ -243,6 +260,13 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
     if hashlib.sha256(raw).hexdigest() != expected_hash:
         raise ValueError("El contenido del dataset no coincide con su SHA-256 guardado.")
     (train_x, train_y), (valid_x, valid_y), (test_x, test_y) = encode_partition(raw, snapshot)
+    if architecture.get("family", "feedforward") == "cnn_8x8":
+        error = validate_cnn_preparation(snapshot)
+        if error:
+            raise ValueError(error)
+        train_x = train_x.reshape((-1, 8, 8, 1))
+        valid_x = valid_x.reshape((-1, 8, 8, 1))
+        test_x = test_x.reshape((-1, 8, 8, 1))
     model = make_model(snapshot, architecture, lr, seed)
     with Session(engine(db_url)) as db:
         job = db.get(TrainingJob, job_id)
@@ -299,7 +323,7 @@ def train_one(db_url: str, job_id: UUID, storage: PrivateStorage | None = None):
             best_epoch = min(recorded, key=lambda row: row.val_loss).epoch if recorded else None
             db.add(ModelVersion(job_id=job_id, project_id=project_id,
                 storage_key=key, sha256=hashlib.sha256(data).hexdigest(), test_metrics=metrics,
-                name=f"Feedforward · {job_id.hex[:8]}", stage="candidate", notes="",
+                name=f"{'CNN 8×8' if architecture.get('family') == 'cnn_8x8' else 'Feedforward'} · {job_id.hex[:8]}", stage="candidate", notes="",
                 best_epoch=best_epoch, epochs_trained=len(recorded),
                 early_stopped=(early_patience > 0 and len(recorded) < epochs)))
             job.status = "COMPLETED"

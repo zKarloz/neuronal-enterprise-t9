@@ -353,3 +353,87 @@ def test_public_reference_csvs_are_real_and_compatible():
         prep = prepare_csv(raw, "target", "classification", 0.15, 0.15, 42)
         partitions = encode_partition(raw, prep)
         assert sum(len(x) for x, _ in partitions) == rows
+
+# v0.9: contrato CNN 8×8 sin dependencias TensorFlow en el servidor FastAPI.
+def test_cnn_architecture_validations_and_backward_compatibility(lab):
+    client, _, _ = lab
+    pid, _, _ = setup(lab)
+    url = f"/api/v1/projects/{pid}/architectures"
+    good = {"name": "CNN dígitos", "family": "cnn_8x8", "conv_filters": 8,
+            "kernel_size": 3, "dense_units": 16}
+    result = client.post(url, json=good)
+    assert result.status_code == 201, result.text
+    assert result.json()["family"] == "cnn_8x8"
+    assert result.json()["config_json"]["conv_filters"] == 8
+    for wrong in (
+        {**good, "conv_filters": 33},
+        {**good, "kernel_size": 5},
+        {**good, "layers": [{"units": 8, "activation": "relu"}]},
+        {**good, "dense_units": 0},
+        {**good, "family": "feedforward"},
+    ):
+        assert client.post(url, json=wrong).status_code == 422
+    # Contratos ya publicados siguen admitiendo el payload antiguo sin family.
+    old = client.post(url, json={"name": "Densa compatible", "layers": [{
+        "units": 8, "activation": "relu"}]})
+    assert old.status_code == 201
+    assert old.json()["family"] == "feedforward"
+
+
+def test_cnn_rejects_non_image_dataset(lab):
+    client, _, _ = lab
+    pid, _, tabular_id = setup(lab)
+    result = client.post(f"/api/v1/projects/{pid}/architectures", json={
+        "name": "CNN únicamente imágenes", "family": "cnn_8x8", "conv_filters": 8,
+        "kernel_size": 3, "dense_units": 16})
+    assert result.status_code == 201
+    assert submit(client, pid, result.json()["id"], tabular_id).status_code == 422
+
+
+def test_cnn_uci_real_csv_65_columns_and_queue(lab):
+    from pathlib import Path
+    from hashlib import sha256
+    from app.models.entities import DatasetRecord
+    from app.services.cnn_validation import validate_cnn_preparation
+    from app.services.csv_pipeline import inspect_csv
+    client, eng, _ = lab
+    pid, _, _ = setup(lab)
+    raw = (Path(__file__).resolve().parents[3] /
+           "apps/web/public/datasets/digits-8x8.csv").read_bytes()
+    inspection = inspect_csv(raw)
+    assert inspection["column_count"] == 65
+    assert inspection["row_count"] == 1797
+    preparation = prepare_csv(raw, "label", "classification", 0.15, 0.15, 42)
+    assert validate_cnn_preparation(preparation) is None
+    with Session(eng) as db:
+        item = DatasetRecord(project_id=UUID(pid), name="digits-8x8.csv", version=1,
+            storage_key=f"{pid}/{uuid4()}.csv", sha256=sha256(raw).hexdigest(),
+            size_bytes=len(raw), row_count=1797, column_count=65,
+            columns_json=inspection["columns"], preview_json=inspection["preview"], prep_json=preparation)
+        db.add(item)
+        db.commit()
+        did = str(item.id)
+    arch = client.post(f"/api/v1/projects/{pid}/architectures", json={
+        "name": "CNN dígitos UCI", "family": "cnn_8x8", "conv_filters": 8,
+        "kernel_size": 3, "dense_units": 16})
+    assert arch.status_code == 201, arch.text
+    job = submit(client, pid, arch.json()["id"], did)
+    assert job.status_code == 202, job.text
+    with Session(eng) as db:
+        record = db.get(TrainingJob, UUID(job.json()["id"]))
+        assert record.config_snapshot["family"] == "cnn_8x8"
+        assert record.preparation_snapshot["input_dimensions"] == 64
+
+
+def test_cnn_preparation_rejects_disordered_pixels():
+    from app.services.cnn_validation import validate_cnn_preparation
+    # Los CSV tabulares de 64 dimensiones no se interpretan como imágenes.
+    prep = {"pipeline_version": 1, "task": "classification", "input_dimensions": 64,
+            "classes": ["0", "1"],
+            "features": [{"name": f"pixel_{i}", "kind": "numeric"} for i in range(64)]}
+    assert validate_cnn_preparation(prep) is None
+    prep["features"][0]["name"] = "edad"
+    assert validate_cnn_preparation(prep)
+    prep["features"][0]["name"] = "pixel_0"
+    prep["task"] = "regression"
+    assert validate_cnn_preparation(prep)

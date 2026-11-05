@@ -11,10 +11,10 @@ from app.api.authentication import router as authentication_router
 from app.api.google_oauth import router as google_oauth_router
 from app.api.datasets import router as datasets_router
 from app.api.training import router as training_router
-app=FastAPI(title="NeuroLab Enterprise",version="0.8.0")
+app=FastAPI(title="NeuroLab Enterprise",version="0.9.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings().origins,allow_credentials=False,allow_methods=["GET","POST","PATCH","DELETE","OPTIONS"],allow_headers=["Authorization","Content-Type"])
 @app.get("/api/v1/health")
-def health():return {"status":"ok","version":"0.8.0"}
+def health():return {"status":"ok","version":"0.9.0"}
 @app.get("/api/v1/ready")
 def ready(db:Session=Depends(get_db)):
     try: db.execute(text("SELECT 1"))

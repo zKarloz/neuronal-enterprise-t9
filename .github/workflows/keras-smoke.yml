@@ -26,3 +26,8 @@ jobs:
           TF_CPP_MIN_LOG_LEVEL: '2'
           OMP_NUM_THREADS: '2'
         run: python workers/training/early_stopping_smoke.py
+      - name: Verificar CNN 8×8 con dígitos UCI reales
+        env:
+          TF_CPP_MIN_LOG_LEVEL: '2'
+          OMP_NUM_THREADS: '2'
+        run: python -m workers.training.cnn_smoke_test

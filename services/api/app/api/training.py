@@ -11,12 +11,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.projects import editor, one
+from app.services.cnn_validation import validate_cnn_preparation
 from app.core.auth import Identity, current_user
 from app.core.database import get_db
 from app.models.entities import (
@@ -33,8 +34,26 @@ class DenseLayer(BaseModel):
 
 
 class ArchitectureInput(BaseModel):
+    """Las configuraciones Feedforward antiguas siguen siendo válidas."""
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=3, max_length=100)
-    layers: list[DenseLayer] = Field(min_length=1, max_length=4)
+    family: Literal["feedforward", "cnn_8x8"] = "feedforward"
+    layers: list[DenseLayer] = Field(default_factory=list, max_length=4)
+    conv_filters: int | None = Field(default=None, ge=4, le=32)
+    kernel_size: Literal[3] | None = None
+    dense_units: int | None = Field(default=None, ge=8, le=128)
+
+    @model_validator(mode="after")
+    def validate_family(self):
+        if self.family == "feedforward":
+            if not 1 <= len(self.layers) <= 4 or any(v is not None for v in (
+                self.conv_filters, self.kernel_size, self.dense_units)):
+                raise ValueError("Feedforward requiere entre 1 y 4 capas densas y no admite campos CNN.")
+        elif self.layers or any(v is None for v in (
+            self.conv_filters, self.kernel_size, self.dense_units)):
+            raise ValueError("CNN 8×8 requiere filtros, kernel_size=3 y neuronas densas, sin capas Feedforward.")
+        return self
+
     @field_validator("name")
     @classmethod
     def name_valid(cls, value: str) -> str:
@@ -137,8 +156,13 @@ def create_architecture(project_id: UUID, payload: ArchitectureInput,
     # Cada edición crea un recurso inmutable, nunca sobrescribe un modelo utilizado.
     version = (db.scalar(select(func.max(ArchitectureRecord.version)).where(
         ArchitectureRecord.project_id == project_id, ArchitectureRecord.name == payload.name)) or 0) + 1
+    if payload.family == "cnn_8x8":
+        configuration = {"family": "cnn_8x8", "conv_filters": payload.conv_filters,
+                         "kernel_size": payload.kernel_size, "dense_units": payload.dense_units}
+    else:
+        configuration = {"layers": [layer.model_dump() for layer in payload.layers]}
     record = ArchitectureRecord(project_id=project_id, name=payload.name, version=version,
-                                family="feedforward", config_json={"layers": [layer.model_dump() for layer in payload.layers]})
+                                family=payload.family, config_json=configuration)
     db.add(record)
     db.flush()
     db.add(AuditEvent(actor_id=identity.id, project_id=project_id, action="architecture.created"))
@@ -162,12 +186,16 @@ def enqueue_job(project_id: UUID, payload: JobInput,
         ArchitectureRecord.id == payload.architecture_id, ArchitectureRecord.project_id == project_id))
     dataset = db.scalar(select(DatasetRecord).where(
         DatasetRecord.id == payload.dataset_id, DatasetRecord.project_id == project_id))
-    if architecture is None or architecture.family != "feedforward":
-        raise HTTPException(422, "Selecciona una arquitectura Feedforward remota válida.")
+    if architecture is None or architecture.family not in ("feedforward", "cnn_8x8"):
+        raise HTTPException(422, "Selecciona una arquitectura remota compatible.")
     if dataset is None or not dataset.prep_json:
         raise HTTPException(422, "Selecciona un dataset remoto preparado en M05.")
     if dataset.prep_json.get("pipeline_version") != 1:
         raise HTTPException(422, "Versión de preprocesamiento no compatible.")
+    if architecture.family == "cnn_8x8":
+        error = validate_cnn_preparation(dataset.prep_json)
+        if error:
+            raise HTTPException(422, error)
     # Bloquear el proyecto mientras comprobamos trabajos activos; dos POST
     # concurrentes no pueden encolar trabajos activos del mismo proyecto.
     if db.bind.dialect.name == "postgresql":

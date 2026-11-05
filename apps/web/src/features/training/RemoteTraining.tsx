@@ -6,7 +6,7 @@ import { request, type RemoteProject } from '../../lib/api/client';
 import { ensureSession, loadSession } from '../../lib/api/session';
 import { type RemoteDataset } from '../../lib/api/datasets';
 import { createArchitecture, getArchitectures, getJobs, getMetrics, getModels, startJob, cancelJob,
-  retryJob, watchJobEvents, type DenseLayer, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
+  retryJob, watchJobEvents, type DenseLayer, type ArchitectureDraft, type EpochMetric, type RemoteArchitecture, type RemoteJob, type RemoteModel } from '../../lib/api/training';
 import { EmptyState, Heading, Notice } from '../../components/ui';
 import { MetricChart } from '../../components/MetricChart';
 import { hasAccuracyMetrics, mergeRemoteMetrics, toChartMetrics } from '../../lib/remote-metrics';
@@ -27,6 +27,10 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const [architectures, setArchitectures] = useState<RemoteArchitecture[]>([]);
   const [architectureId, setArchitectureId] = useState('');
   const [name, setName] = useState('Feedforward remoto');
+  // La familia define qué parámetros se muestran; entrada/salida son automáticas.
+  const [family, setFamily] = useState<'feedforward' | 'cnn_8x8'>('feedforward');
+  const [convFilters, setConvFilters] = useState(8);
+  const [denseUnits, setDenseUnits] = useState(32);
   const [layers, setLayers] = useState<DenseLayer[]>(INIT_LAYERS);
   const [jobs, setJobs] = useState<RemoteJob[]>([]);
   const [jobId, setJobId] = useState('');
@@ -48,6 +52,15 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   const chartMetrics = toChartMetrics(metrics);
   const hasAccuracy = hasAccuracyMetrics(metrics);
   const prepared = datasets.filter(item => item.prep_json !== null);
+  const selectedArchitecture = architectures.find(item => item.id === architectureId);
+  const selectedDataset = datasets.find(item => item.id === datasetId);
+  // Validación de UX: el servidor vuelve a validar el snapshot de M05.
+  const compatibleCnn = (item: RemoteDataset | undefined) => {
+    const prep = item?.prep_json;
+    return prep?.task === 'classification' && prep.input_dimensions === 64 &&
+      prep.features.length === 64 && prep.features.every((f, i) => f.kind === 'numeric' && f.name === `pixel_${i}`);
+  };
+  const incompatibleCnn = selectedArchitecture?.family === 'cnn_8x8' && !compatibleCnn(selectedDataset);
 
   const storeMetrics = useCallback((id: string, rows: EpochMetric[]) => {
     setMetricsByJob(current => ({ ...current, [id]: mergeRemoteMetrics(current[id] ?? [], rows) }));
@@ -154,8 +167,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
   if (!loadSession()) return <><Heading eyebrow="Laboratorio · M06" title="Entrenamientos del servidor"/>
     <div className="panel p-6"><EmptyState icon={<ShieldCheck size={28}/>} title="Se requiere iniciar sesión" description="Entra con Google desde M02 → Servidor." action={<button className="btn-primary" onClick={() => navigate('projects')}>Abrir proyectos</button>}/></div></>;
   return <div className="space-y-5">
-    <Heading eyebrow="Experimentación · M06 · Servidor" title="Entrenamiento Feedforward remoto"
-      description="Trabajos persistidos en PostgreSQL; TensorFlow/Keras se ejecuta en un worker Python independiente. El navegador nunca ejecuta el entrenamiento remoto."/>
+    <Heading eyebrow="Experimentación · M06 · Servidor" title="Entrenamiento neuronal remoto"
+      description="Redes Feedforward y CNN 8×8 versionadas. TensorFlow/Keras se ejecuta en un worker Python; SSE muestra las métricas reales."/>
     <Notice tone="warning">Para empezar un trabajo debes mantener el worker Python ejecutándose en tu equipo. Los trabajos en cola permanecen guardados aunque cierres el navegador.</Notice>
     {error && <Notice tone="error">{error}</Notice>}
     {notice && <Notice tone="success">{notice}</Notice>}
@@ -169,21 +182,47 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
     {!projectId ? <div className="panel p-5"><EmptyState icon={<Database size={24}/>} title="Crea un proyecto remoto" description="Visita M02 → Servidor para continuar." action={<button className="btn-primary" onClick={() => navigate('projects')}>Ir a M02</button>}/></div> : <>
       <div className="grid gap-5 xl:grid-cols-2">
         <section className="panel p-5 space-y-4">
-          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><BrainCircuit size={19}/> Arquitecturas Feedforward</h2>
+          <h2 className="flex items-center gap-2 text-base font-bold text-ink"><BrainCircuit size={19}/> Arquitecturas neuronales</h2>
+          <div><label htmlFor="arch-family" className="field-label">Tipo de red</label>
+            <select id="arch-family" className="field" value={family} onChange={e => {
+              const next = e.target.value as 'feedforward' | 'cnn_8x8';
+              setFamily(next); setName(next === 'cnn_8x8' ? 'CNN - Dígitos 8×8' : 'Feedforward remoto');
+            }}>
+              <option value="feedforward">Feedforward · tabular</option>
+              <option value="cnn_8x8">CNN · imágenes 8×8</option>
+            </select>
+          </div>
           <div><label htmlFor="arch-name" className="field-label">Nombre</label><input id="arch-name" className="field" maxLength={100} value={name} onChange={e => setName(e.target.value)}/></div>
-          {layers.map((layer, i) => <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-            <div><label className="field-label" htmlFor={`units-${i}`}>Capa {i + 1} · neuronas</label><input id={`units-${i}`} className="field" type="number" min={2} max={128} value={layer.units} onChange={e => updateLayer(i, { units: Number(e.target.value) })}/></div>
-            <div><label className="field-label" htmlFor={`activation-${i}`}>Activación</label><select id={`activation-${i}`} className="field" value={layer.activation} onChange={e => updateLayer(i, { activation: e.target.value as DenseLayer['activation'] })}><option value="relu">ReLU</option><option value="tanh">Tanh</option><option value="sigmoid">Sigmoid</option></select></div>
-            <button aria-label={`Eliminar capa ${i + 1}`} className="btn-outline" disabled={layers.length === 1} onClick={() => setLayers(ls => ls.filter((_, ix) => ix !== i))}><Ban size={16}/></button>
-          </div>)}
-          <div className="flex flex-wrap gap-2"><button className="btn-outline" disabled={layers.length >= 4} onClick={() => setLayers(old => [...old, { units: 16, activation: 'relu' }])}><Plus size={16}/> Capa</button>
-            <button className="btn-primary" disabled={busy} onClick={() => void action(async () => { const item = await createArchitecture(projectId, await token(), name, layers); await refresh(projectId); setArchitectureId(item.id); setNotice(`Arquitectura ${item.name}, versión ${item.version}, guardada.`); })}><CheckCircle2 size={16}/> Guardar versión</button></div>
-          <p className="text-xs text-slate-500">Solo capas densas (1–4); la salida se configura según el dataset. Cada guardado crea una versión inmutable.</p>
+          {family === 'feedforward' ? <>
+            {layers.map((layer, i) => <div key={i} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+              <div><label className="field-label" htmlFor={`units-${i}`}>Capa {i + 1} · neuronas</label><input id={`units-${i}`} className="field" type="number" min={2} max={128} value={layer.units} onChange={e => updateLayer(i, { units: Number(e.target.value) })}/></div>
+              <div><label className="field-label" htmlFor={`activation-${i}`}>Activación</label><select id={`activation-${i}`} className="field" value={layer.activation} onChange={e => updateLayer(i, { activation: e.target.value as DenseLayer['activation'] })}><option value="relu">ReLU</option><option value="tanh">Tanh</option><option value="sigmoid">Sigmoid</option></select></div>
+              <button aria-label={`Eliminar capa ${i + 1}`} className="btn-outline" disabled={layers.length === 1} onClick={() => setLayers(ls => ls.filter((_, ix) => ix !== i))}><Ban size={16}/></button>
+            </div>)}
+            <button className="btn-outline" disabled={layers.length >= 4} onClick={() => setLayers(old => [...old, { units: 16, activation: 'relu' }])}><Plus size={16}/> Capa densa</button>
+          </> : <>
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+              Entrada automática 8×8×1 → Conv2D (ReLU, kernel 3×3) → MaxPooling 2×2 → Flatten → Dense (ReLU) → Salida Softmax automática.
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="field-label" htmlFor="conv-filters">Filtros convolucionales</label><input id="conv-filters" className="field" type="number" min={4} max={32} value={convFilters} onChange={e => setConvFilters(Number(e.target.value))}/></div>
+              <div><label className="field-label" htmlFor="cnn-dense-units">Neuronas densas</label><input id="cnn-dense-units" className="field" type="number" min={8} max={128} value={denseUnits} onChange={e => setDenseUnits(Number(e.target.value))}/></div>
+            </div>
+          </>}
+          <button className="btn-primary" disabled={busy} onClick={() => void action(async () => {
+            const draft: ArchitectureDraft = family === 'cnn_8x8'
+              ? { name, family, conv_filters: convFilters, kernel_size: 3, dense_units: denseUnits }
+              : { name, family, layers };
+            const item = await createArchitecture(projectId, await token(), draft);
+            await refresh(projectId); setArchitectureId(item.id);
+            setNotice(`Arquitectura ${item.name}, versión ${item.version}, guardada.`);
+          })}><CheckCircle2 size={16}/> Guardar versión</button>
+          <p className="text-xs text-slate-500">La salida se ajusta al dataset; las arquitecturas se versionan de forma inmutable. CNN exige pixel_0 … pixel_63 y clasificación en M05.</p>
         </section>
         <section className="panel p-5 space-y-4">
           <h2 className="flex items-center gap-2 text-base font-bold text-ink"><Activity size={19}/> Nuevo entrenamiento</h2>
           <div><label className="field-label" htmlFor="remote-job-dataset">Dataset preparado (M05)</label><select id="remote-job-dataset" className="field" value={datasetId} onChange={e => setDatasetId(e.target.value)}><option value="">Seleccionar dataset</option>{prepared.map(d => <option key={d.id} value={d.id}>{d.name} · v{d.version} · {d.prep_json?.task}</option>)}</select></div>
-          <div><label className="field-label" htmlFor="remote-job-architecture">Arquitectura guardada</label><select id="remote-job-architecture" className="field" value={architectureId} onChange={e => setArchitectureId(e.target.value)}><option value="">Seleccionar arquitectura</option>{architectures.map(a => <option key={a.id} value={a.id}>{a.name} · v{a.version}</option>)}</select></div>
+          <div><label className="field-label" htmlFor="remote-job-architecture">Arquitectura guardada</label><select id="remote-job-architecture" className="field" value={architectureId} onChange={e => setArchitectureId(e.target.value)}><option value="">Seleccionar arquitectura</option>{architectures.map(a => <option key={a.id} value={a.id}>{a.name} · {a.family === 'cnn_8x8' ? 'CNN 8×8' : 'Feedforward'} · v{a.version}</option>)}</select></div>
           <div className="grid grid-cols-2 gap-3">{([
             ['Épocas', epochs, setEpochs, 1, 40, 'epochs-server'], ['Batch size', batchSize, setBatchSize, 1, 256, 'batch-server'],
             ['Learning rate', rate, setRate, 0.000001, 0.1, 'lr-server'], ['Semilla', seed, setSeed, 0, 2147483647, 'seed-server'],
@@ -199,7 +238,8 @@ export default function RemoteTraining({ navigate }: { navigate: (page: Page) =>
                 value={patience} onChange={e => setPatience(Number(e.target.value))}/></div>}
           </div>
           {!prepared.length && <Notice tone="warning">Prepara primero un CSV remoto desde M05 → Servidor.</Notice>}
-          <button className="btn-primary w-full" disabled={busy || !datasetId || !architectureId || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
+          {incompatibleCnn && <Notice tone="warning">Para entrenar esta CNN, prepara un CSV de 64 píxeles numéricos (pixel_0 a pixel_63), columna objetivo label y tarea Clasificación.</Notice>}
+          <button className="btn-primary w-full" disabled={busy || incompatibleCnn || !datasetId || !architectureId || jobs.some(j => ['QUEUED', 'PREPARING', 'RUNNING'].includes(j.status))} onClick={() => void action(async () => {
             const item = await startJob(projectId, await token(), { architecture_id: architectureId, dataset_id: datasetId, epochs, batch_size: batchSize, learning_rate: rate, seed, early_stopping_patience: earlyStop ? patience : 0 });
             await refresh(projectId); setJobId(item.id); setNotice('Trabajo encolado. El worker lo ejecutará cuando esté disponible.');
           })}>{busy ? <Loader2 size={17} className="animate-spin"/> : <Plus size={17}/>} Encolar entrenamiento</button>

@@ -4,9 +4,13 @@ import { apiUrl } from './config';
 
 export interface DenseLayer { units: number; activation: 'relu' | 'tanh' | 'sigmoid' }
 export interface RemoteArchitecture {
-  id: string; project_id: string; name: string; family: 'feedforward'; version: number;
-  config_json: { layers: DenseLayer[] }; created_at: string;
+  id: string; project_id: string; name: string; family: 'feedforward' | 'cnn_8x8'; version: number;
+  config_json: { layers?: DenseLayer[]; family?: 'cnn_8x8'; conv_filters?: number; kernel_size?: number; dense_units?: number }; created_at: string;
 }
+/** Contrato discriminado: no mezclar parámetros CNN con capas Feedforward. */
+export type ArchitectureDraft =
+  | { name: string; family: 'feedforward'; layers: DenseLayer[] }
+  | { name: string; family: 'cnn_8x8'; conv_filters: number; kernel_size: 3; dense_units: number };
 export type JobStatus = 'QUEUED' | 'PREPARING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export interface RemoteJob {
   id: string; project_id: string; architecture_id: string; dataset_id: string;
@@ -25,8 +29,8 @@ export interface RemoteModel {
 }
 const base = (project: string) => `/projects/${project}`;
 export const getArchitectures = (p: string, t: string) => request<RemoteArchitecture[]>(`${base(p)}/architectures`, t);
-export const createArchitecture = (p: string, t: string, name: string, layers: DenseLayer[]) =>
-  request<RemoteArchitecture>(`${base(p)}/architectures`, t, 'POST', { name, layers });
+export const createArchitecture = (p: string, t: string, draft: ArchitectureDraft) =>
+  request<RemoteArchitecture>(`${base(p)}/architectures`, t, 'POST', draft);
 export const getJobs = (p: string, t: string) => request<RemoteJob[]>(`${base(p)}/training-jobs`, t);
 export const startJob = (p: string, t: string, data: { architecture_id: string; dataset_id: string; epochs: number; batch_size: number; learning_rate: number; seed: number; early_stopping_patience: number }) =>
   request<RemoteJob>(`${base(p)}/training-jobs`, t, 'POST', data);
