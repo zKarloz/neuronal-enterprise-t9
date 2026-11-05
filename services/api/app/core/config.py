@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     dataset_bucket: str = "neurolab-datasets"
     model_bucket: str = "neurolab-models"
+    # Cuotas defensivas del servicio; el cliente nunca decide los límites.
+    max_projects_per_user: int = 20
+    max_members_per_project: int = 20
+    max_datasets_per_project: int = 50
+    max_architectures_per_project: int = 100
     # URL fija para evitar redirecciones a dominios no autorizados.
     oauth_callback_url: str = ""
     oauth_frontend_url: str = ""

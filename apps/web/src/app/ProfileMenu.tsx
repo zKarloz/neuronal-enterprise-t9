@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, LoaderCircle, LogIn, LogOut, UserRound } from 'lucide-react';
 import { startGoogleOAuth } from '../lib/api/google-oauth';
 import { Notice } from '../components/ui';
-import { loadSession, logout, SESSION_CHANGED, type RemoteSession } from '../lib/api/session';
+import { ensureSession, loadSession, logout, SESSION_CHANGED, type RemoteSession } from '../lib/api/session';
+import { request } from '../lib/api/client';
 
 export default function ProfileMenu() {
   const [session, setSession] = useState<RemoteSession | null>(() => loadSession());
@@ -31,6 +32,16 @@ export default function ProfileMenu() {
       document.removeEventListener('visibilitychange', visible);
     };
   }, []);
+
+  // Sincronizar el usuario verificado por JWT: solo cuentas registradas pueden
+  // añadirse a otros proyectos. No confiar en un correo escrito en el navegador.
+  useEffect(() => {
+    if (!session) return;
+    let mounted = true;
+    void ensureSession(session).then(current => request('/me/register', current.access_token, 'POST'))
+      .catch(cause => { if (mounted) setError(cause instanceof Error ? cause.message : 'No se pudo registrar la cuenta.'); });
+    return () => { mounted = false; };
+  }, [session?.access_token]);
 
   const signIn = async () => {
     setBusy(true); setError('');

@@ -3,11 +3,12 @@ from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from sqlalchemy import select, exists, or_
+from sqlalchemy import select, exists, or_, func
 from sqlalchemy.orm import Session
 from app.core.auth import current_user, Identity
 from app.core.database import get_db
 from app.models.entities import User, Project, ProjectMember, AuditEvent, DatasetRecord, TrainingJob, ArchitectureRecord
+from app.core.config import settings
 router=APIRouter(prefix="/projects", tags=["projects"])
 class ProjectCreate(BaseModel):
     name: str=Field(min_length=3,max_length=80)
@@ -42,8 +43,28 @@ def one(db, pid, identity):
     project=db.scalar(select(Project).where(Project.id==pid,permitted(db, identity.id)))
     if project is None: raise HTTPException(404,"Proyecto no encontrado.")
     return project
-def editor(db, project, identity):
-    return project.owner_id==identity.id or db.scalar(select(ProjectMember.role).where(ProjectMember.project_id==project.id,ProjectMember.user_id==identity.id))=="manager"
+# Matriz de permisos: la propiedad se deriva de projects.owner_id (nunca del cliente).
+PROJECT_ROLES = ("owner", "manager", "engineer", "reviewer", "reader")
+
+
+def role_of(db: Session, project: Project, identity: Identity) -> str | None:
+    if project.owner_id == identity.id:
+        return "owner"
+    return db.scalar(select(ProjectMember.role).where(
+        ProjectMember.project_id == project.id, ProjectMember.user_id == identity.id))
+
+
+def require_roles(db: Session, project: Project, identity: Identity, *allowed: str) -> str:
+    role = role_of(db, project, identity)
+    if role not in allowed:
+        raise HTTPException(403, "No tienes permisos para esta operación.")
+    return role
+
+
+def editor(db: Session, project: Project, identity: Identity) -> bool:
+    """Modificar recursos de IA; NO implica poder editar el proyecto ni gestionar miembros."""
+    return role_of(db, project, identity) in ("owner", "manager", "engineer")
+
 @router.get("",response_model=list[ProjectView])
 def list_projects(identity: Identity=Depends(current_user),db: Session=Depends(get_db)):
     return db.scalars(select(Project).where(permitted(db,identity.id)).order_by(Project.created_at.desc())).all()
@@ -56,6 +77,12 @@ def create(payload: ProjectCreate, identity: Identity=Depends(current_user),db: 
         db.add(User(id=identity.id, email=identity.email))
         db.flush()
 
+    # Serializar la cuota de proyectos por cuenta en PostgreSQL.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(select(User.id).where(User.id == identity.id).with_for_update()).first()
+    used = db.scalar(select(func.count(Project.id)).where(Project.owner_id == identity.id)) or 0
+    if used >= settings().max_projects_per_user:
+        raise HTTPException(409, "Has alcanzado el límite de proyectos de tu cuenta.")
     item=Project(owner_id=identity.id,name=payload.name,description=payload.description.strip())
     db.add(item);db.flush()
     db.add(AuditEvent(actor_id=identity.id,project_id=item.id,action="project.created"));db.commit();db.refresh(item)
@@ -65,7 +92,7 @@ def get(pid:UUID,identity:Identity=Depends(current_user),db:Session=Depends(get_
 @router.patch("/{pid}",response_model=ProjectView)
 def edit(pid:UUID,payload:ProjectPatch,identity:Identity=Depends(current_user),db:Session=Depends(get_db)):
     item=one(db,pid,identity)
-    if not editor(db,item,identity): raise HTTPException(403,"Permisos insuficientes")
+    require_roles(db,item,identity,"owner","manager")
     for k,v in payload.model_dump(exclude_unset=True).items():
         if v is not None: setattr(item,k,v)
     item.updated_at=datetime.now(timezone.utc)

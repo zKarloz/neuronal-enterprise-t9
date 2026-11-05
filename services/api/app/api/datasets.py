@@ -14,6 +14,7 @@ from app.api.projects import one, editor
 from app.core.auth import Identity, current_user
 from app.core.database import get_db
 from app.models.entities import AuditEvent, DatasetRecord, TrainingJob
+from app.core.config import settings
 from app.services.csv_pipeline import CSVValidationError, MAX_CSV_BYTES, inspect_csv, prepare_csv
 from app.services.storage import PrivateStorage, get_storage
 
@@ -53,6 +54,8 @@ def dataset_or_404(db: Session, project_id: UUID, dataset_id: UUID) -> DatasetRe
 def editable(db: Session, project, identity: Identity):
     if not editor(db, project, identity):
         raise HTTPException(403, "No tienes permisos para modificar datasets de este proyecto.")
+    if project.status != "active":
+        raise HTTPException(409, "No puedes modificar datasets de un proyecto archivado.")
 
 
 def clean_filename(raw_name: str) -> str:
@@ -80,6 +83,13 @@ async def upload_dataset(
 ):
     project = one(db, project_id, identity)
     editable(db, project, identity)
+    # La cuota se verifica antes de subir un objeto a Storage.
+    if db.bind.dialect.name == "postgresql":
+        from app.models.entities import Project
+        db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).first()
+    total = db.scalar(select(func.count(DatasetRecord.id)).where(DatasetRecord.project_id == project_id)) or 0
+    if total >= settings().max_datasets_per_project:
+        raise HTTPException(409, "Límite de datasets alcanzado para este proyecto.")
     filename = clean_filename(file.filename or "")
     raw = await file.read(MAX_CSV_BYTES + 1)
     await file.close()

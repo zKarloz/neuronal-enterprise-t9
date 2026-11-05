@@ -17,13 +17,14 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.projects import editor, one
+from app.api.projects import editor, one, require_roles
+from app.core.config import settings
 from app.services.cnn_validation import validate_cnn_preparation
 from app.core.auth import Identity, current_user
 from app.core.database import get_db
 from app.services.storage import PrivateStorage, get_storage
 from app.models.entities import (
-    ArchitectureRecord, AuditEvent, DatasetRecord, ModelVersion, Project, TrainingJob, TrainingMetric,
+    ArchitectureRecord, AuditEvent, DatasetRecord, ModelVersion, Project, ProjectMember, TrainingJob, TrainingMetric,
 )
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["training"])
@@ -155,6 +156,13 @@ def list_architectures(project_id: UUID, identity: Identity = Depends(current_us
 def create_architecture(project_id: UUID, payload: ArchitectureInput,
                         identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
     require_editor(db, project_id, identity)
+    # Se limita el número de versiones antes de generar otra arquitectura.
+    if db.bind.dialect.name == "postgresql":
+        db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).first()
+    total = db.scalar(select(func.count(ArchitectureRecord.id)).where(
+        ArchitectureRecord.project_id == project_id)) or 0
+    if total >= settings().max_architectures_per_project:
+        raise HTTPException(409, "Límite de arquitecturas alcanzado para este proyecto.")
     # Cada edición crea un recurso inmutable, nunca sobrescribe un modelo utilizado.
     version = (db.scalar(select(func.max(ArchitectureRecord.version)).where(
         ArchitectureRecord.project_id == project_id, ArchitectureRecord.name == payload.name)) or 0) + 1
@@ -291,9 +299,17 @@ def retry_job(project_id: UUID, job_id: UUID, identity: Identity = Depends(curre
     return retry
 
 
-def _job_snapshot(bind, project_id: UUID, job_id: UUID) -> dict | None:
+def _job_snapshot(bind, project_id: UUID, job_id: UUID, user_id: UUID | None = None) -> dict | None:
     """Cada consulta SSE usa una sesión breve y no retiene una conexión SQL abierta."""
     with Session(bind) as session:
+        # Una revocación debe detener incluso los streams SSE ya abiertos.
+        # La autorización inicial no basta durante los 45 s del stream.
+        if user_id is not None:
+            project = session.get(Project, project_id)
+            permitted = project is not None and (
+                project.owner_id == user_id or session.get(ProjectMember, (project_id, user_id)) is not None)
+            if not permitted:
+                return None
         job = session.scalar(select(TrainingJob).where(
             TrainingJob.id == job_id, TrainingJob.project_id == project_id))
         if job is None:
@@ -329,7 +345,7 @@ async def job_events(project_id: UUID, job_id: UUID, request: Request,
         while time.monotonic() - start < 45:
             if await request.is_disconnected():
                 return
-            current = await asyncio.to_thread(_job_snapshot, bind, project_id, job_id)
+            current = await asyncio.to_thread(_job_snapshot, bind, project_id, job_id, identity.id)
             if current is None:
                 return
             payload = json.dumps(current, ensure_ascii=False, separators=(",", ":"))
@@ -400,7 +416,13 @@ class ModelUpdate(BaseModel):
 def update_model(project_id: UUID, model_id: UUID, payload: ModelUpdate,
                  identity: Identity = Depends(current_user), db: Session = Depends(get_db)):
     """Registro privado: editor puede nombrar, anotar o promover un modelo."""
-    require_editor(db, project_id, identity)
+    project = one(db, project_id, identity)
+    role = require_roles(db, project, identity, "owner", "manager", "engineer", "reviewer")
+    # Solo los revisores o gestores pueden modificar el estado de aprobación.
+    if payload.stage is not None and role not in ("owner", "manager", "reviewer"):
+        raise HTTPException(403, "Solo un gestor o revisor puede cambiar el estado del modelo.")
+    if project.status != "active":
+        raise HTTPException(409, "El proyecto está archivado.")
     if db.bind.dialect.name == "postgresql":
         # Serializar promociones por proyecto, sin carreras entre solicitudes.
         db.execute(select(Project.id).where(Project.id == project_id).with_for_update()).first()

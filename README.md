@@ -1,4 +1,4 @@
-# NeuroLab Enterprise v0.10.2 — Organización visual y modales compartidos
+# NeuroLab Enterprise v0.11.0 — M10: roles, auditoría y cuotas
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
@@ -39,3 +39,15 @@ Consulta `INSTRUCCIONES_PARCHE_V100.md` y `docs/operations/MODELOS_REPORTES_UI_V
 - Solo cambia `apps/web`: API y worker se mantienen en sus versiones actuales. No hay migraciones ni cambios de buckets.
 
 Consulta `docs/operations/EXPERIENCIA_USUARIO_V102.md`.
+
+## v0.11.0 — Administración y seguridad por proyecto
+
+- M10 ofrece pestañas Navegador/Servidor, administración de integrantes y roles en proyectos remotos, auditoría paginada y cuotas consultables.
+- Roles por proyecto: propietario implícito, responsable, ingeniero, revisor y lector. FastAPI vuelve a verificar los permisos en cada acción; el frontend no es una barrera de seguridad.
+- Un responsable no puede nombrar o modificar a otros responsables. Solo el propietario puede nombrarlos. El revisor puede cambiar la etapa de un modelo, pero no iniciar entrenamientos.
+- Una cuenta debe iniciar sesión una vez para registrarse antes de ser añadida por correo; no hay envío de invitaciones en esta etapa.
+- Se añade la migración **`006_administration_audit`** y se mantiene el worker de entrenamiento sin modificaciones.
+- Los límites configurables (`MAX_PROJECTS_PER_USER`, `MAX_MEMBERS_PER_PROJECT`, `MAX_DATASETS_PER_PROJECT`, `MAX_ARCHITECTURES_PER_PROJECT`) se aplican en FastAPI y no dependen del navegador.
+- Administrador **global**, políticas de retención automatizadas, alertas y cuotas dinámicas por plan quedan fuera de esta primera implementación de M10.
+
+Ver `docs/operations/ADMINISTRACION_RBAC_V110.md`.
