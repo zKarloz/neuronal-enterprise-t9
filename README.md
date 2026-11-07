@@ -1,3 +1,5 @@
+> **v0.12.2 — Importación única M05.** Un solo botón «Importar dataset» abre un modal que detecta de forma segura CSV tabulares Feedforward o dígitos CNN 8×8. Los límites y validaciones de cada formato permanecen separados, y no se modifican los motores ni los modelos existentes. Ver `docs/operations/IMPORTACION_UNIFICADA_V122.md`.
+
 > **v0.12.1 — Consolidación del motor local.** Feedforward y CNN utilizan TensorFlow.js para entrenar en el navegador; modelos Feedforward antiguos de TypeScript siguen siendo inferibles. La cuenta Google aún no sincroniza el espacio local. Ver `docs/operations/FEEDFORWARD_TFJS_V121.md`.
 
 # NeuroLab Enterprise v0.12.1 — Feedforward TensorFlow.js en el navegador
