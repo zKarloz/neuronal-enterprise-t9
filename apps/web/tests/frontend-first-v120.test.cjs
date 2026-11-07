@@ -5,32 +5,36 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const src = rel => readFileSync(join(__dirname, '../src', rel), 'utf8');
 
-test('los nueve módulos híbridos priorizan una experiencia local y conservan histórico', () => {
+test('los nueve módulos utilizan una sola interfaz sin importar pantallas antiguas', () => {
   for (const hub of ['dashboard/DashboardHub.tsx','projects/Projects.tsx',
       'architectures/ArchitecturesHub.tsx','datasets/Datasets.tsx',
       'training/TrainingHub.tsx','evaluation/EvaluationHub.tsx',
       'model-registry/ModelsHub.tsx','reports/ReportsHub.tsx',
       'administration/AdministrationHub.tsx']) {
     const text = src(`features/${hub}`);
-    assert.match(text, /ModuleExperience/, hub);
+    assert.doesNotMatch(text, /ModuleExperience|RemoteDashboard|RemoteTraining|RemoteDatasets|RemoteEvaluation|RemoteModels|RemoteReports|RemoteProjects|RemoteAdministration|RemoteArchitectures/, hub);
     assert.doesNotMatch(text, /<ModeTabs/, hub);
   }
 });
 
-test('el retorno OAuth se consume de forma global y no depende de Proyectos remotos', () => {
-  assert.match(src('app/App.tsx'), /<GoogleOAuthReturn\/>/);
-  const oauth = src('app/GoogleOAuthReturn.tsx');
-  assert.match(oauth, /consumeGoogleReturn/);
-  assert.match(oauth, /completeGoogleOAuth/);
-  assert.match(oauth, /pendingExchange/);
-  assert.doesNotMatch(src('features/projects/RemoteProjects.tsx'), /consumeGoogleReturn/);
+test('el inicio de sesión por correo gobierna todos los módulos', () => {
+  const gate = src('app/AccountGate.tsx');
+  assert.match(src('main.tsx'), /<AccountGate>/);
+  assert.match(gate, /signInWithPassword/);
+  assert.match(gate, /signUpWithPassword/);
+  assert.match(gate, /me\/register/);
+  assert.doesNotMatch(src('app/App.tsx'), /<GoogleOAuthReturn\/>/);
+  assert.doesNotMatch(src('app/ProfileMenu.tsx'), /startGoogleOAuth/);
 });
 
-test('el acceso histórico está bajo Administración y se advierte que no sincroniza datos', () => {
-  const admin = src('features/administration/Administration.tsx');
-  assert.match(admin, /advancedOpen/);
-  assert.match(admin, /legacyPagePath/);
-  assert.match(src('app/ModuleExperience.tsx'), /No se han trasladado/);
+test('el laboratorio utiliza exclusivamente su espacio de la cuenta', () => {
+  const provider = src('app/WorkspaceProvider.tsx');
+  assert.match(provider, /workspace-backup\/status/);
+  assert.match(provider, /expected_revision/);
+  assert.match(provider, /owner\.id !== account\.id/);
+  assert.doesNotMatch(provider, /readWorkspace\(/);
+  assert.doesNotMatch(provider, /saveWorkspace\(/);
+  assert.match(src('app/ModuleExperience.tsx'), /return <>{browser}<\/>/);
 });
 
 test('los motores existentes entrenan de verdad y no se han sustituido por métricas simuladas', () => {

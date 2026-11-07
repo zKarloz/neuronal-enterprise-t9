@@ -43,11 +43,11 @@ test('se respetan los tamaños máximos diferentes de cada formato', () => {
   assert.throws(() => parseLocalCsv(source, 1_500_001), /1,5 MB/);
 });
 
-test('M05 ofrece una sola acción de importación con modal y conserva el histórico', () => {
+test('M05 ofrece una sola acción de importación con modal sin pantallas duplicadas', () => {
   const ui = readFileSync(join(__dirname, '../src/features/datasets/Datasets.tsx'), 'utf8');
   assert.match(ui, /<Modal title="Importar dataset"/);
   assert.match(ui, /parseLocalCsv\(/);
   assert.match(ui, /Usar dígitos incluidos/);
-  assert.match(ui, /historical=\{<RemoteDatasets/);
+  assert.doesNotMatch(ui, /historical=\{<RemoteDatasets/);
   assert.doesNotMatch(ui, /Importar CSV CNN propio/);
 });

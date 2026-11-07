@@ -47,7 +47,7 @@ test('dashboard local y remoto comparten bloques y aviso una vez por sesión', (
   assert.match(read('features/dashboard/Dashboard.tsx'), /Completar un entrenamiento/);
   assert.match(read('components/SessionNotice.tsx'), /sessionStorage/);
   assert.match(read('features/reports/Reports.tsx'), /SessionNotice/);
-  assert.match(read('features/administration/Administration.tsx'), /SessionNotice/);
+  assert.match(read('features/administration/Administration.tsx'), /Almacenamiento remoto/);
 });
 test('tema oscuro atenúa bordes y la tarjeta de modelo guardado', () => {
   const css = read('index.css');

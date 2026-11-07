@@ -9,7 +9,7 @@ test('M02, M05, M06, M07, M08 y M09 comparten una única interfaz principal', ()
   for (const file of ['features/projects/Projects.tsx', 'features/datasets/Datasets.tsx',
     'features/training/TrainingHub.tsx', 'features/evaluation/EvaluationHub.tsx',
     'features/model-registry/ModelsHub.tsx', 'features/reports/ReportsHub.tsx']) {
-    assert.match(src(file), /ModuleExperience/, file);
+    assert.doesNotMatch(src(file), /ModuleExperience/, file);
     assert.doesNotMatch(src(file), /<ModeTabs\b/, file);
   }
 });

@@ -1,11 +1,11 @@
 /**
- * Sesiones OAuth/OTP usando exclusivamente nuestra API.
+ * Sesiones de correo/contraseña usando exclusivamente nuestra API.
  * La sesión se conserva solo en esta pestaña mediante sessionStorage.
  * Para producción de mayor escala: BFF con cookies HttpOnly, CSRF y mismo dominio.
  */
 import { request } from './client';
 
-const STORAGE_KEY = 'neurolab-remote-session-v1';
+const STORAGE_KEY = 'neurolab-account-session-v2';
 export const SESSION_CHANGED = 'neurolab:session-changed';
 
 interface TokenResponse {
@@ -31,7 +31,7 @@ function toSession(data: TokenResponse, fallbackEmail = ''): RemoteSession {
   };
 }
 
-/** Guardar una respuesta OAuth/OTP para reutilizar la renovación actual. */
+/** Guardar una sesión entregada por Supabase a través de FastAPI. */
 export function saveTokenResponse(data: TokenResponse): RemoteSession {
   const result = toSession(data);
   saveSession(result);
@@ -49,9 +49,10 @@ export function loadSession(): RemoteSession | null {
   } catch { return null; }
 }
 
-export function saveSession(session: RemoteSession): void {
+export function saveSession(session: RemoteSession, notify = true): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-  window.dispatchEvent(new Event(SESSION_CHANGED));
+  // La renovación del mismo usuario no debe desmontar entrenamientos activos.
+  if (notify) window.dispatchEvent(new Event(SESSION_CHANGED));
 }
 
 export function clearSession(): void {
@@ -59,6 +60,28 @@ export function clearSession(): void {
   window.dispatchEvent(new Event(SESSION_CHANGED));
 }
 
+export async function signInWithPassword(email: string, password: string): Promise<RemoteSession> {
+  const data = await request<TokenResponse>('/auth/password/login', undefined, 'POST', { email, password });
+  return saveTokenResponse(data);
+}
+
+export async function signUpWithPassword(email: string, password: string): Promise<{ confirmation_required: boolean }> {
+  const result = await request<{ confirmation_required: boolean; session: TokenResponse | null }>(
+    '/auth/password/signup', undefined, 'POST', { email, password },
+  );
+  if (result.session) saveTokenResponse(result.session);
+  return { confirmation_required: result.confirmation_required };
+}
+
+export async function sendRecoveryEmail(email: string): Promise<void> {
+  await request('/auth/password/recover', undefined, 'POST', { email });
+}
+
+export async function updateRecoveredPassword(accessToken: string, password: string): Promise<void> {
+  await request('/auth/password/update', accessToken, 'POST', { password });
+}
+
+/** Endpoints OTP antiguos solo se conservan para compatibilidad de archivo. */
 export async function sendOtp(email: string): Promise<void> {
   await request('/auth/otp', undefined, 'POST', { email });
 }
@@ -77,7 +100,7 @@ export async function ensureSession(session: RemoteSession): Promise<RemoteSessi
     refresh_token: session.refresh_token,
   });
   const refreshed = toSession(response, session.email);
-  saveSession(refreshed);
+  saveSession(refreshed, false);
   return refreshed;
 }
 

@@ -20,17 +20,19 @@ test('ingenieros, revisores y lectores no administran integrantes', () => {
   assert.equal(availableRoles('owner').length, 4);
   assert.equal(availableRoles('manager').some(r => r.value === 'manager'), false);
 });
-test('M10 oculta la vista histórica en configuración y mantiene permisos, cuotas y paginación', () => {
+test('M10 mantiene el motor local y elimina la navegación a herramientas heredadas', () => {
   const hub = src('features/administration/AdministrationHub.tsx');
   const remote = src('features/administration/RemoteAdministration.tsx');
-  assert.match(hub, /ModuleExperience/);
-  assert.match(src('features/administration/Administration.tsx'), /Consultar archivo remoto/);
+  assert.match(hub, /LocalAdministration/);
+  assert.doesNotMatch(hub, /RemoteAdministration/);
+  assert.match(src('features/administration/Administration.tsx'), /Almacenamiento remoto/);
+  assert.doesNotMatch(src('features/administration/Administration.tsx'), /legacyPagePath/);
   for (const part of ['Modal', 'Pagination', 'administration/members', '}/audit?limit=', '}/resources']) {
     assert.ok(remote.includes(part), part);
   }
 });
 test('la identidad de los miembros se registra con JWT y no por formulario', () => {
-  const profile = src('app/ProfileMenu.tsx');
+  const profile = src('app/AccountGate.tsx');
   assert.match(profile, /ensureSession/);
   assert.match(profile, /me\/register/);
   assert.doesNotMatch(profile, /role:\s*'owner'/);

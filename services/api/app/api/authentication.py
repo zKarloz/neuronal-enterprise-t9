@@ -1,4 +1,7 @@
-"""Autenticación por OTP. El navegador solo se comunica con nuestra API.
+"""Autenticación por correo/contraseña con Supabase Auth.
+
+El navegador solo se comunica con FastAPI: la contraseña se entrega al proveedor
+mediante HTTPS y nunca se guarda en PostgreSQL ni en logs del aplicativo.
 
 Supabase Auth sigue siendo el proveedor de identidad; la publishable key
 se usa EXCLUSIVAMENTE desde este servicio, no desde React.
@@ -6,6 +9,8 @@ se usa EXCLUSIVAMENTE desde este servicio, no desde React.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
+from urllib.parse import urlsplit
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
@@ -34,6 +39,11 @@ class VerifyRequest(EmailRequest):
     token: str = Field(pattern=r"^[0-9]{6,8}$")
 
 
+class PasswordCredentials(EmailRequest):
+    # Supabase impone su propia política; se exige también una longitud mínima en API.
+    password: str = Field(min_length=8, max_length=128)
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=10, max_length=4096)
 
@@ -45,7 +55,17 @@ class SessionResponse(BaseModel):
     email: str
 
 
-async def supabase_post(path: str, payload: dict[str, Any], access_token: str | None = None) -> dict[str, Any]:
+class PasswordChange(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordSignUpResponse(BaseModel):
+    confirmation_required: bool
+    session: SessionResponse | None = None
+
+
+async def supabase_post(path: str, payload: dict[str, Any], access_token: str | None = None,
+                        method: str = "POST") -> dict[str, Any]:
     """Petición servidor-servidor con tiempo máximo y errores controlados."""
     config = settings()
     if not config.supabase_url or not config.supabase_publishable_key:
@@ -59,8 +79,8 @@ async def supabase_post(path: str, payload: dict[str, Any], access_token: str | 
         headers["Authorization"] = f"Bearer {access_token}"
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
-            result = await client.post(
-                f"{config.supabase_url.rstrip('/')}/auth/v1/{path}",
+            result = await client.request(
+                method, f"{config.supabase_url.rstrip('/')}/auth/v1/{path}",
                 json=payload, headers=headers,
             )
     except httpx.RequestError:
@@ -69,8 +89,16 @@ async def supabase_post(path: str, payload: dict[str, Any], access_token: str | 
     if result.is_error:
         if result.status_code == 429:
             raise HTTPException(429, "Se alcanzó el límite de solicitudes. Intenta más tarde.")
-        if path == "verify" or path.startswith("token?"):
+        if path == "verify":
             raise HTTPException(401, "Código inválido, vencido o sesión expirada.")
+        if path == "token?grant_type=password":
+            raise HTTPException(401, "Correo o contraseña incorrectos, o cuenta pendiente de confirmar.")
+        if path.startswith("token?"):
+            raise HTTPException(401, "La sesión ha expirado. Inicia sesión de nuevo.")
+        if path == "signup":
+            raise HTTPException(400, "No fue posible crear la cuenta. Revisa el correo y la contraseña.")
+        if path == "user":
+            raise HTTPException(400, "No se pudo actualizar la contraseña. Comprueba que el enlace sea válido.")
         if result.status_code >= 500:
             raise HTTPException(502, "El proveedor de autenticación no está disponible.")
         raise HTTPException(400, "No fue posible completar la solicitud de acceso.")
@@ -98,6 +126,57 @@ def session_view(data: dict[str, Any], default_email: str = "") -> SessionRespon
         )
     except (KeyError, TypeError, ValueError):
         raise HTTPException(502, "El proveedor devolvió una sesión incompleta.") from None
+
+
+@router.post("/password/signup", response_model=PasswordSignUpResponse)
+async def password_signup(payload: PasswordCredentials):
+    """No emitir sesión ficticia mientras Supabase exige verificar el correo."""
+    data = await supabase_post("signup", {
+        "email": payload.email,
+        "password": payload.password,
+    })
+    if data.get("access_token") and data.get("refresh_token"):
+        return PasswordSignUpResponse(confirmation_required=False, session=session_view(data, payload.email))
+    return PasswordSignUpResponse(confirmation_required=True)
+
+
+@router.post("/password/login", response_model=SessionResponse)
+async def password_login(payload: PasswordCredentials):
+    data = await supabase_post("token?grant_type=password", {
+        "email": payload.email,
+        "password": payload.password,
+    })
+    return session_view(data, payload.email)
+
+
+@router.post("/password/recover", status_code=202)
+async def password_recovery(payload: EmailRequest):
+    """Enviar correo de recuperación; URL fija y jamás elegida por el cliente."""
+    config = settings()
+    target = urlsplit(config.auth_frontend_url)
+    if not (target.scheme == "https" or target.scheme == "http" and target.hostname in ("localhost", "127.0.0.1")):
+        raise HTTPException(503, "Configura AUTH_FRONTEND_URL para habilitar recuperación de contraseña.")
+    if config.auth_frontend_url.rstrip("/") not in config.origins:
+        raise HTTPException(503, "AUTH_FRONTEND_URL debe pertenecer a FRONTEND_ORIGINS.")
+    await supabase_post(f"recover?redirect_to={quote(config.auth_frontend_url, safe='')}", {"email": payload.email})
+    # No revelar si la dirección tiene una cuenta.
+    return {"message": "Si existe la cuenta, recibirás instrucciones para restablecer la contraseña."}
+
+
+@router.post("/password/update", status_code=204)
+async def password_update(
+    payload: PasswordChange,
+    identity: Identity = Depends(current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+):
+    """Supabase valida el token de recuperación y actualiza la contraseña.
+    No guardamos el nuevo secreto en la aplicación ni en PostgreSQL.
+    """
+    _ = identity
+    if credentials is None:
+        raise HTTPException(401, "El enlace de recuperación no es válido.")
+    await supabase_post("user", {"password": payload.password}, credentials.credentials, method="PUT")
+    return Response(status_code=204)
 
 
 @router.post("/otp", status_code=202)

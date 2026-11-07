@@ -1,7 +1,5 @@
 // Operaciones locales de creación, edición, filtrado y archivo de proyectos.
 import { useMemo, useState } from 'react';
-import {RemoteProjects} from './RemoteProjects';
-import ModuleExperience from '../../app/ModuleExperience';
 import { Archive, CheckCircle2, CirclePlus, FolderKanban, Pencil, Search, Trash2, Undo2 } from 'lucide-react';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { EmptyState, Heading, Modal, Notice, StatusPill, formatDate } from '../../components/ui';
@@ -40,7 +38,7 @@ function LocalProjects({ onNewProject }: { onNewProject: () => void }) {
     try { deleteProject(p.id); } catch (err) { setError((err as Error).message); }
   };
   return <>
-    <Heading eyebrow="Gestión · M02" title="Proyectos de IA" description="Organiza las investigaciones y conserva su historial en el almacenamiento local del navegador." action={<button onClick={onNewProject} className="btn-primary"><CirclePlus size={17}/> Crear proyecto</button>}/>
+    <Heading eyebrow="Gestión · M02" title="Proyectos de IA" description="Organiza tus investigaciones. Todos los cambios se guardan en tu cuenta." action={<button onClick={onNewProject} className="btn-primary"><CirclePlus size={17}/> Crear proyecto</button>}/>
     {error && <div className="mb-4"><Notice tone="error">{error}</Notice></div>}
     <div className="panel mb-5 flex flex-wrap items-center gap-3 p-4"><div className="relative min-w-[220px] flex-1"><Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input className="field pl-10" placeholder="Buscar proyectos..." value={query} onChange={e => setQuery(e.target.value)}/></div><div className="flex rounded-xl bg-slate-100 p-1">{(['all','active','archived'] as const).map(key => <button key={key} className={`rounded-lg px-3 py-2 text-xs font-semibold transition-all ${filter === key ? 'bg-white text-ink shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} onClick={() => setFilter(key)}>{key === 'all' ? 'Todos' : key === 'active' ? 'Activos' : 'Archivados'}</button>)}</div></div>
     {!data.projects.length ? <div className="panel"><EmptyState icon={<FolderKanban size={27}/>} title="Todavía no hay proyectos" description="Crea un proyecto propio para comenzar a importar datasets, diseñar arquitecturas y entrenar modelos." action={<button className="btn-primary" onClick={onNewProject}><CirclePlus size={16}/> Crear proyecto</button>}/></div> :
@@ -61,7 +59,7 @@ function LocalProjects({ onNewProject }: { onNewProject: () => void }) {
   </>;
 }
 
-/** La vista remota antigua se conserva únicamente como consulta avanzada. */
+/** Una única interfaz, asociada al usuario autenticado. */
 export default function Projects({ onNewProject }: { onNewProject: () => void }) {
-  return <ModuleExperience page="projects" browser={<LocalProjects onNewProject={onNewProject}/>} historical={<RemoteProjects/>}/>;
+  return <LocalProjects onNewProject={onNewProject}/>;
 }

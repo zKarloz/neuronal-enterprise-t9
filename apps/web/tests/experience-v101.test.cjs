@@ -20,8 +20,8 @@ test('las notificaciones son flotantes, accesibles y se cierran a los cinco segu
   assert.match(text, /aria-live/);
 });
 test('el panel y las arquitecturas priorizan navegador sin perder el archivo remoto', () => {
-  assert.match(read('features/dashboard/DashboardHub.tsx'), /ModuleExperience/);
-  assert.match(read('features/architectures/ArchitecturesHub.tsx'), /ModuleExperience/);
+  assert.match(read('features/dashboard/DashboardHub.tsx'), /LocalDashboard/);
+  assert.match(read('features/architectures/ArchitecturesHub.tsx'), /LocalArchitectures/);
   assert.match(read('features/architectures/RemoteArchitectures.tsx'), /createArchitecture/);
 });
 test('el topbar sigue la sección del sidebar y permite modo oscuro', () => {
