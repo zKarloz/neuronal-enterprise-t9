@@ -4,6 +4,7 @@ import { validateTraining } from '../lib/neural';
 import { trainDenseTfjsNetwork } from '../lib/dense-tfjs';
 import { trainCnnNetwork, validateCnnTraining } from '../lib/cnn';
 import { emptyWorkspace, readWorkspace, saveWorkspace } from '../lib/storage';
+import { validateWorkspaceBackup } from '../lib/workspace-backup';
 import { validateArchitectureDraft } from '../features/architectures/validation';
 import type { Architecture, Dataset, HiddenLayer, ModelVersion, Project, TrainingConfig, TrainingRun, WorkspaceState, Family, CnnConfig } from '../types/domain';
 
@@ -27,6 +28,7 @@ interface WorkspaceAPI {
   startTraining: (dataset: Dataset, architecture: Architecture, config: TrainingConfig) => Promise<void>;
   cancelTraining: () => void;
   clearWorkspace: () => void;
+  restoreWorkspace: (snapshot: unknown) => void;
 }
 const WorkspaceContext = createContext<WorkspaceAPI | null>(null);
 const makeId = () => crypto.randomUUID();
@@ -162,11 +164,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   };
   const cancelTraining = () => { if (cancelRef.current) cancelRef.current.cancelled = true; };
+  // Recuperación solo explícita desde Administración. Persistir ANTES de cambiar
+  // el estado de React para que una cuota de localStorage no deje una copia falsa.
+  const restoreWorkspace = (snapshot: unknown) => {
+    if (cancelRef.current || isTraining) throw new Error('Cancela el entrenamiento antes de recuperar una copia.');
+    const validated = validateWorkspaceBackup(snapshot);
+    // No reactivar un job que dependía de otra pestaña/computadora.
+    const restored: WorkspaceState = {
+      ...validated,
+      runs: validated.runs.map(run => run.status === 'running' || run.status === 'queued'
+        ? { ...run, status: 'cancelled' as const, error: 'Entrenamiento interrumpido antes de recuperar la copia.' }
+        : run),
+    };
+    saveWorkspace(restored); // Lanza error si la cuota del navegador se agotó.
+    setData(restored);
+  };
   const clearWorkspace = () => {
     if (isTraining) throw new Error('Cancela el entrenamiento antes de borrar los datos.');
     setData(emptyWorkspace());
   };
-  return <WorkspaceContext.Provider value={{ data, activeProject, activeArchitecture, isTraining, storageError, dismissStorageError: () => setStorageError(''), selectProject, createProject, editProject, deleteProject, saveArchitecture, selectArchitecture, removeArchitecture, importDataset, removeDataset, startTraining, cancelTraining, clearWorkspace }}>{children}</WorkspaceContext.Provider>;
+  return <WorkspaceContext.Provider value={{ data, activeProject, activeArchitecture, isTraining, storageError, dismissStorageError: () => setStorageError(''), selectProject, createProject, editProject, deleteProject, saveArchitecture, selectArchitecture, removeArchitecture, importDataset, removeDataset, startTraining, cancelTraining, clearWorkspace, restoreWorkspace }}>{children}</WorkspaceContext.Provider>;
 }
 
 export function useWorkspace(): WorkspaceAPI {
