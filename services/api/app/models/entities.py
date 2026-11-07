@@ -129,3 +129,14 @@ class ModelVersion(Base):
     epochs_trained: Mapped[int | None] = mapped_column(Integer, nullable=True)
     early_stopped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock)
+
+
+class BrowserWorkspaceBackup(Base):
+    """Una copia explícita por identidad; no sincroniza el histórico remoto ni entrena modelos."""
+    __tablename__ = "browser_workspace_backups"
+    user_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    workspace_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=clock, nullable=False)

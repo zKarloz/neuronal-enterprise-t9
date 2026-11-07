@@ -1,3 +1,5 @@
+> **v0.12.3 — Copia privada del laboratorio por cuenta Google.** M10 permite guardar manualmente y recuperar proyectos, datasets, métricas y pesos del navegador sin worker. FastAPI guarda una copia JSON protegida por JWT y revisión optimista; migración `007_browser_workspace_backups` obligatoria. **No es sincronización automática** ni reemplaza los proyectos remotos históricos. Ver `docs/operations/COPIAS_PRIVADAS_V123.md`.
+
 > **v0.12.2 — Importación única M05.** Un solo botón «Importar dataset» abre un modal que detecta de forma segura CSV tabulares Feedforward o dígitos CNN 8×8. Los límites y validaciones de cada formato permanecen separados, y no se modifican los motores ni los modelos existentes. Ver `docs/operations/IMPORTACION_UNIFICADA_V122.md`.
 
 > **v0.12.1 — Consolidación del motor local.** Feedforward y CNN utilizan TensorFlow.js para entrenar en el navegador; modelos Feedforward antiguos de TypeScript siguen siendo inferibles. La cuenta Google aún no sincroniza el espacio local. Ver `docs/operations/FEEDFORWARD_TFJS_V121.md`.

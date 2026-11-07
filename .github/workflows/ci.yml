@@ -50,3 +50,12 @@ jobs:
         env:
           PYTHONPATH: services/api:.
         run: python -m pytest -q services/api/tests
+
+      - name: Validar migraciones desde una base nueva
+        env:
+          PYTHONPATH: services/api:.
+          DATABASE_URL: sqlite+pysqlite:///./neurolab-ci-migration.db
+        run: |
+          cd services/api
+          python -m alembic -c alembic.ini upgrade head
+          python -m alembic -c alembic.ini current | grep 007_browser_workspace_backups

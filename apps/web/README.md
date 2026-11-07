@@ -1,3 +1,7 @@
+## v0.12.3 — Copias de laboratorio por cuenta (manual)
+
+En **Administración** se pueden guardar y recuperar copias privadas de los proyectos, CSV, entrenamientos y pesos de modelos TensorFlow.js del navegador. Las solicitudes utilizan el JWT de Google y el endpoint protegido de FastAPI. La copia activa tiene límite de 3 MiB y revisión optimista; en dispositivos con datos locales, recuperar exige antes descargar un JSON. También se puede reimportar el JSON local. **No es sincronización automática y no mezcla los datos remotos .keras.** Requiere backend v0.12.3 y migración `007_browser_workspace_backups`.
+
 > **Actualización v0.12.1:** el motor Feedforward nuevo usa TensorFlow.js (clasificación binaria y regresión); la CNN ya usaba TensorFlow.js. El motor TypeScript anterior permanece solo para compatibilidad de los modelos históricos y sus pruebas de regresión. Ejecuta `npm run test:tfjs` para verificar entrenamiento y predicción reales con TensorFlow.js. Los datos siguen en el navegador y **no** se sincronizan automáticamente con Google.
 
 > **v0.5.0:** Este frontend mantiene la ejecución local y añade **M05 → Servidor** para CSV remotos mediante FastAPI. Consulta `../../docs/operations/DATASETS_REMOTOS_V050.md` para configurar Supabase Storage y el despliegue. Los proyectos/datasets locales no se transfieren automáticamente.
