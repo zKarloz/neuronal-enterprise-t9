@@ -1,13 +1,8 @@
-/** M07 híbrido: conserva evaluación local e incorpora métricas de trabajos remotos. */
-import { useUrlMode } from '../../app/useUrlMode';
-import { ModeTabs } from '../../components/ui';
+/** M07: métricas y comparaciones locales; histórico remoto bajo configuración. */
+import ModuleExperience from '../../app/ModuleExperience';
 import LocalEvaluation from './Evaluation';
 import RemoteEvaluation from './RemoteEvaluation';
 
 export default function EvaluationHub() {
-  const [mode, setMode] = useUrlMode();
-  return <>
-    <ModeTabs mode={mode} setMode={setMode} label="Origen de las evaluaciones"/>
-    {mode === 'local' ? <LocalEvaluation/> : <RemoteEvaluation/>}
-  </>;
+  return <ModuleExperience page="evaluation" browser={<LocalEvaluation/>} historical={<RemoteEvaluation/>}/>;
 }
