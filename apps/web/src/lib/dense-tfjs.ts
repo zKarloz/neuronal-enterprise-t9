@@ -85,24 +85,23 @@ export async function trainDenseTfjsNetwork(
     // Transponemos al exportar para reutilizar `predict()` sin reentrenar modelos existentes.
     const layers: NetworkLayer[] = [];
     for (let index = 0; index < model.layers.length; index++) {
+      // Los pesos devueltos por getWeights() pertenecen al modelo.
+      // No llamar a dispose() sobre ellos: model.dispose() los libera al terminar.
+      // Liberarlos aquí provoca "LayersVariable ... is already disposed" en CI.
       const weights = model.layers[index].getWeights();
-      try {
-        if (weights.length !== 2 || weights[0].shape.length !== 2 || weights[1].shape.length !== 1) {
-          throw new Error('La estructura de pesos de TensorFlow.js no es compatible con la inferencia Feedforward.');
-        }
-        const [inputs, units] = weights[0].shape;
-        const flat = Array.from(await weights[0].data());
-        const biases = Array.from(await weights[1].data());
-        if (flat.some(value => !Number.isFinite(value)) || biases.some(value => !Number.isFinite(value))) {
-          throw new Error('Los pesos del modelo entrenado contienen valores no finitos.');
-        }
-        const matrix = Array.from({ length: units }, (_, unit) =>
-          Array.from({ length: inputs }, (_, input) => flat[input * units + unit]));
-        layers.push({ weights: matrix, biases, activation: index === model.layers.length - 1
-          ? (isClassification ? 'sigmoid' : 'linear') : architecture.hiddenLayers[index].activation });
-      } finally {
-        weights.forEach(weight => weight.dispose());
+      if (weights.length !== 2 || weights[0].shape.length !== 2 || weights[1].shape.length !== 1) {
+        throw new Error('La estructura de pesos de TensorFlow.js no es compatible con la inferencia Feedforward.');
       }
+      const [inputs, units] = weights[0].shape;
+      const flat = Array.from(await weights[0].data());
+      const biases = Array.from(await weights[1].data());
+      if (flat.some(value => !Number.isFinite(value)) || biases.some(value => !Number.isFinite(value))) {
+        throw new Error('Los pesos del modelo entrenado contienen valores no finitos.');
+      }
+      const matrix = Array.from({ length: units }, (_, unit) =>
+        Array.from({ length: inputs }, (_, input) => flat[input * units + unit]));
+      layers.push({ weights: matrix, biases, activation: index === model.layers.length - 1
+        ? (isClassification ? 'sigmoid' : 'linear') : architecture.hiddenLayers[index].activation });
     }
     return { layers, means: prepared.means, stds: prepared.stds,
       targetMean: prepared.targetMean, targetStd: prepared.targetStd,
