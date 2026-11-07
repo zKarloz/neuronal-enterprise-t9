@@ -1,12 +1,8 @@
-/** M10 mantiene la administración local y añade permisos auditables en Servidor. */
-import { useUrlMode } from '../../app/useUrlMode';
-import { ModeTabs } from '../../components/ui';
+/** M10: administración local con acceso optativo a auditoría remota. */
+import ModuleExperience from '../../app/ModuleExperience';
 import LocalAdministration from './Administration';
 import RemoteAdministration from './RemoteAdministration';
 
 export default function AdministrationHub() {
-  const [mode, setMode] = useUrlMode();
-  return <><ModeTabs mode={mode} setMode={setMode} label="Origen de administración"/>
-    {mode === 'local' ? <LocalAdministration/> : <RemoteAdministration/>}
-  </>;
+  return <ModuleExperience page="administration" browser={<LocalAdministration/>} historical={<RemoteAdministration/>}/>;
 }

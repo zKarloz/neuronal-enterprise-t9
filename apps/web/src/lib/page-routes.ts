@@ -39,3 +39,13 @@ export function withMode(url: URL, mode: WorkspaceMode): string {
   else result.searchParams.delete('vista');
   return `${result.pathname}${result.search}${result.hash}`;
 }
+
+/** Compatibilidad: solo un enlace explícito desde Administración abre servicios remotos antiguos. */
+export function isLegacyServerSearch(search: string): boolean {
+  return new URLSearchParams(search).get('vista') === 'servidor';
+}
+
+/** No se incluyen JWT ni identificadores privados en los enlaces compartibles. */
+export function legacyPagePath(page: Page): string {
+  return `${pagePath(page)}?vista=servidor`;
+}

@@ -6,17 +6,6 @@ import { request, type RemoteProject } from '../../lib/api/client';
 import { clearSession, ensureSession, loadSession, SESSION_CHANGED, type RemoteSession } from '../../lib/api/session';
 import { EmptyState, Heading, Modal, Notice, StatusPill, formatDate } from '../../components/ui';
 import { LoadingState, RemoteAuthRequired, RemoteUnavailable } from '../../components/RemoteStates';
-import { consumeGoogleReturn, completeGoogleOAuth } from '../../lib/api/google-oauth';
-
-// Compartir el intercambio entre los dos montajes de React.StrictMode.
-let oauthTask: Promise<RemoteSession> | null = null;
-function pendingOAuth(): Promise<RemoteSession> | null {
-  if (!oauthTask) {
-    const callback = consumeGoogleReturn();
-    if (callback) oauthTask = completeGoogleOAuth(callback);
-  }
-  return oauthTask;
-}
 
 export function RemoteProjects() {
   const [session, setSession] = useState<RemoteSession | null>(() => loadSession());
@@ -30,24 +19,6 @@ export function RemoteProjects() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    const task = pendingOAuth();
-    if (task) {
-      setBusy(true);
-      void task.then(result => {
-        if (alive) { setSession(result); }
-      }).catch((cause: unknown) => {
-        if (alive) setError(cause instanceof Error ? cause.message : 'No se pudo iniciar sesión.');
-      }).finally(() => {
-        if (alive) setBusy(false);
-        // El código es de un solo uso: no se reutiliza para nuevos intentos.
-        oauthTask = null;
-      });
-    }
-    return () => { alive = false; };
-  }, []);
 
   // El topbar es el punto único de acceso y cierre de sesión.
   useEffect(() => {

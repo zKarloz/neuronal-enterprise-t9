@@ -1,4 +1,4 @@
-# NeuroLab Enterprise v0.11.0 — M10: roles, auditoría y cuotas
+# NeuroLab Enterprise v0.12.0 — Primera etapa frontend-first
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
@@ -51,3 +51,14 @@ Consulta `docs/operations/EXPERIENCIA_USUARIO_V102.md`.
 - Administrador **global**, políticas de retención automatizadas, alertas y cuotas dinámicas por plan quedan fuera de esta primera implementación de M10.
 
 Ver `docs/operations/ADMINISTRACION_RBAC_V110.md`.
+
+
+## v0.12.0 — Primera etapa de unificación (frontend-first)
+
+- **Interfaz única por módulo:** las pestañas Navegador/Servidor dejan de mostrarse. La pantalla principal utiliza las funciones y entrenamiento reales del navegador.
+- **Archivo remoto conservado:** desde **Administración → Herramientas avanzadas → Consultar archivo remoto** se pueden abrir los módulos de FastAPI usando `?vista=servidor`. Los datos remotos no se eliminan ni se copian automáticamente.
+- **Google OAuth:** el retorno PKCE se resuelve a nivel global; el inicio de sesión no depende de que la vista remota de Proyectos esté montada.
+- **Limitación conocida:** Feedforward local usa un motor propio TypeScript; CNN 8×8 usa TensorFlow.js. La conversión de Feedforward a TensorFlow.js y la sincronización segura navegador↔cuenta son entregas posteriores. El acceso Google es opcional en esta etapa para no asociar por error los datos locales a una cuenta.
+- Sin cambios en FastAPI, worker, almacenamiento, migraciones ni modelos `.keras` existentes. La API permanece en v0.11.0.
+
+Consulta `docs/operations/TRANSICION_FRONTEND_FIRST_V120.md`.

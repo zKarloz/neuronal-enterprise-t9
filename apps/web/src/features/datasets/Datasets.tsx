@@ -1,6 +1,6 @@
 // Importación de CSV validada en el navegador, sin enviar archivos a una API.
 import { useRef, useState } from 'react';
-import { useUrlMode } from '../../app/useUrlMode';
+import ModuleExperience from '../../app/ModuleExperience';
 import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Trash2, UploadCloud, Image, ScanLine } from 'lucide-react';
 import RemoteDatasets from './RemoteDatasets';
 import { useWorkspace } from '../../app/WorkspaceProvider';
@@ -8,7 +8,7 @@ import { MAX_CSV_BYTES, datasetSummary, parseCsv } from '../../lib/csv';
 import { isDigitsDataset, MAX_DIGITS_CSV_BYTES, parseDigitsCsv } from '../../lib/digits';
 import DigitPreview from '../../components/DigitPreview';
 import { download } from '../../lib/storage';
-import { EmptyState, Heading, Notice, SectionTitle, ModeTabs, formatDate } from '../../components/ui';
+import { EmptyState, Heading, Notice, SectionTitle, formatDate } from '../../components/ui';
 import type { Page } from '../../app/App';
 
 function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
@@ -86,11 +86,7 @@ function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
 }
 
 
-/** Selector seguro: el laboratorio local sigue intacto, y el modo remoto es opcional. */
+/** M05 prioriza la importación local y mantiene los CSV remotos en consulta avanzada. */
 export default function Datasets({ navigate }: { navigate: (page: Page) => void }) {
-  const [mode, setMode] = useUrlMode();
-  return <>
-    <ModeTabs mode={mode} setMode={setMode} label="Almacenamiento de datasets"/>
-    {mode === 'local' ? <LocalDatasets navigate={navigate}/> : <RemoteDatasets navigate={navigate}/>}
-  </>;
+  return <ModuleExperience page="datasets" browser={<LocalDatasets navigate={navigate}/>} historical={<RemoteDatasets navigate={navigate}/>}/>;
 }
