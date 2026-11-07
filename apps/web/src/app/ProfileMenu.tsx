@@ -1,12 +1,12 @@
 /** Identidad global en el topbar; nunca se muestra un usuario local ficticio. */
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LoaderCircle, LogIn, LogOut, UserRound } from 'lucide-react';
-import { startGoogleOAuth } from '../lib/api/google-oauth';
+import { ChevronDown, LoaderCircle, LogOut, UserRound } from 'lucide-react';
 import { Notice } from '../components/ui';
-import { ensureSession, loadSession, logout, SESSION_CHANGED, type RemoteSession } from '../lib/api/session';
-import { request } from '../lib/api/client';
+import { useWorkspace } from './WorkspaceProvider';
+import { loadSession, logout, SESSION_CHANGED, type RemoteSession } from '../lib/api/session';
 
 export default function ProfileMenu() {
+  const { isTraining, syncStatus } = useWorkspace();
   const [session, setSession] = useState<RemoteSession | null>(() => loadSession());
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,23 +33,12 @@ export default function ProfileMenu() {
     };
   }, []);
 
-  // Sincronizar el usuario verificado por JWT: solo cuentas registradas pueden
-  // añadirse a otros proyectos. No confiar en un correo escrito en el navegador.
-  useEffect(() => {
-    if (!session) return;
-    let mounted = true;
-    void ensureSession(session).then(current => request('/me/register', current.access_token, 'POST'))
-      .catch(cause => { if (mounted) setError(cause instanceof Error ? cause.message : 'No se pudo registrar la cuenta.'); });
-    return () => { mounted = false; };
-  }, [session?.access_token]);
 
-  const signIn = async () => {
-    setBusy(true); setError('');
-    try { await startGoogleOAuth(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo iniciar sesión.'); setBusy(false); }
-  };
   const signOut = async () => {
     if (!session) return;
+    if ((isTraining || syncStatus !== 'saved') && !window.confirm(
+      'Hay cambios sin guardar o un entrenamiento en curso. Al salir se interrumpirá el entrenamiento y podrían perderse los últimos cambios. ¿Cerrar sesión igualmente?',
+    )) return;
     setBusy(true); setError('');
     try { await logout(session); setSession(null); setOpen(false); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo cerrar sesión.'); }
@@ -57,11 +46,7 @@ export default function ProfileMenu() {
   };
 
   return <div ref={root} className="relative ml-auto shrink-0">
-    {!session ? <button type="button" onClick={() => void signIn()} disabled={busy}
-      className="btn-primary !px-3 !py-2.5 text-xs sm:!px-4" aria-label="Iniciar sesión con Google">
-      {busy ? <LoaderCircle size={16} className="animate-spin"/> : <LogIn size={16}/>}
-      <span className="hidden sm:inline">Iniciar sesión</span><span className="sm:hidden">Acceder</span>
-    </button> : <button type="button" aria-expanded={open} aria-haspopup="menu" aria-label={`Sesión: ${session.email}`}
+    {!session ? null : <button type="button" aria-expanded={open} aria-haspopup="menu" aria-label={`Sesión: ${session.email}`}
       className="flex max-w-[220px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-primary-500"
       onClick={() => setOpen(value => !value)}>
       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-100 text-primary-700"><UserRound size={17}/></span>
@@ -69,7 +54,7 @@ export default function ProfileMenu() {
       <ChevronDown size={15} className="hidden shrink-0 text-slate-400 sm:block"/>
     </button>}
     {session && open && <div role="menu" className="absolute right-0 top-full z-40 mt-2 w-[min(300px,85vw)] rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cuenta de Google</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Cuenta NeuroLab</p>
       <p className="mt-1 break-all text-sm font-semibold text-ink">{session.email}</p>
       <div className="my-3 border-t border-slate-100"/>
       <button role="menuitem" type="button" disabled={busy} onClick={() => void signOut()}

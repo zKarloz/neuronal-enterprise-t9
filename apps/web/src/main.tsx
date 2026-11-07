@@ -3,6 +3,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { WorkspaceProvider } from './app/WorkspaceProvider';
+import AccountGate from './app/AccountGate';
 import App from './app/App';
 import { ToastProvider } from './components/ToastProvider';
 
@@ -17,8 +18,8 @@ try {
 // Punto de entrada único del frontend React.
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <WorkspaceProvider>
-      <ToastProvider><App /></ToastProvider>
-    </WorkspaceProvider>
+    <ToastProvider>
+      <AccountGate>{account => <WorkspaceProvider key={account.id} account={account}><App/></WorkspaceProvider>}</AccountGate>
+    </ToastProvider>
   </React.StrictMode>
 );

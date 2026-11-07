@@ -1,8 +1,6 @@
 // M05: punto de entrada único para CSV tabulares y dígitos CNN en el navegador.
 import { useRef, useState } from 'react';
-import ModuleExperience from '../../app/ModuleExperience';
 import { CheckCircle2, Database, Download, FileSpreadsheet, FileUp, Image, Loader2, Trash2, UploadCloud } from 'lucide-react';
-import RemoteDatasets from './RemoteDatasets';
 import { useWorkspace } from '../../app/WorkspaceProvider';
 import { datasetSummary } from '../../lib/csv';
 import { isDigitsDataset, MAX_DIGITS_CSV_BYTES } from '../../lib/digits';
@@ -151,14 +149,14 @@ function LocalDatasets({ navigate }: { navigate: (page: Page) => void }) {
             {candidate.headers.map(header => <option key={header} value={header}>{header}</option>)}
           </select>
         </div>}
-        <p className="mb-3 text-xs text-amber-700">{current ? 'Se reemplazará el dataset activo. Los modelos históricos se conservarán.' : 'Se guardará este dataset en el navegador para el proyecto actual.'}</p>
+        <p className="mb-3 text-xs text-amber-700">{current ? 'Se reemplazará el dataset activo. Los modelos históricos se conservarán.' : 'Se guardará este dataset en tu cuenta.'}</p>
         <button type="button" className="btn-primary w-full" disabled={busy || isTraining} onClick={save}><FileUp size={17}/> {current ? 'Confirmar reemplazo' : 'Importar dataset'}</button>
       </div>}
     </Modal>}
   </>;
 }
 
-/** M05 mantiene el acceso al archivo remoto histórico bajo Administración. */
+/** M05 tiene un único importador; el CSV se guarda automáticamente en tu cuenta. */
 export default function Datasets({ navigate }: { navigate: (page: Page) => void }) {
-  return <ModuleExperience page="datasets" browser={<LocalDatasets navigate={navigate}/>} historical={<RemoteDatasets navigate={navigate}/>}/>;
+  return <LocalDatasets navigate={navigate}/>;
 }

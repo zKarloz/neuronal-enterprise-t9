@@ -1,8 +1,3 @@
-/** M10: administración local con acceso optativo a auditoría remota. */
-import ModuleExperience from '../../app/ModuleExperience';
+/** M10: preferencias, respaldo opcional y guardado remoto de la cuenta. */
 import LocalAdministration from './Administration';
-import RemoteAdministration from './RemoteAdministration';
-
-export default function AdministrationHub() {
-  return <ModuleExperience page="administration" browser={<LocalAdministration/>} historical={<RemoteAdministration/>}/>;
-}
+export default function AdministrationHub() { return <LocalAdministration/>; }

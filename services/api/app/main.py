@@ -8,14 +8,13 @@ from app.core.database import get_db
 from app.core.auth import current_user, Identity
 from app.api.projects import router
 from app.api.authentication import router as authentication_router
-from app.api.google_oauth import router as google_oauth_router
 from app.api.datasets import router as datasets_router
 from app.api.training import router as training_router
 from app.api.reports import router as reports_router
 from app.api.administration import router as administration_router
 from app.api.workspace_backups import router as workspace_backups_router
 from app.models.entities import User
-api = FastAPI(title="NeuroLab Enterprise", version="0.12.3")
+api = FastAPI(title="NeuroLab Enterprise", version="0.13.0")
 
 
 class PublicCORS(CORSMiddleware):
@@ -29,7 +28,7 @@ class PublicCORS(CORSMiddleware):
         return self.app.dependency_overrides
 
 @api.get("/api/v1/health")
-def health():return {"status":"ok","version":"0.12.3"}
+def health():return {"status":"ok","version":"0.13.0"}
 @api.get("/api/v1/ready")
 def ready(db:Session=Depends(get_db)):
     try: db.execute(text("SELECT 1"))
@@ -55,7 +54,7 @@ def register_me(identity: Identity = Depends(current_user), db: Session = Depend
     return {"id": identity.id, "email": user.email}
 api.include_router(router,prefix="/api/v1")
 api.include_router(authentication_router,prefix="/api/v1")
-api.include_router(google_oauth_router,prefix="/api/v1")
+# Google OAuth ya no se publica; la identidad se obtiene con correo/contraseña.
 
 api.include_router(datasets_router,prefix="/api/v1")
 
