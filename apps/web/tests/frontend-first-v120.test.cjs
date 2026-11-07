@@ -35,7 +35,7 @@ test('el acceso histórico está bajo Administración y se advierte que no sincr
 
 test('los motores existentes entrenan de verdad y no se han sustituido por métricas simuladas', () => {
   const provider = src('app/WorkspaceProvider.tsx');
-  assert.match(provider, /trainDenseNetwork/);
+  assert.match(provider, /trainDenseTfjsNetwork/);
   assert.match(provider, /trainCnnNetwork/);
   assert.match(src('lib/cnn.ts'), /\.fit\(/);
 });

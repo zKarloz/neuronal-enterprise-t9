@@ -1,6 +1,7 @@
 // Proveedor de dominio: estado, persistencia del navegador y ejecución local.
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { trainDenseNetwork, validateTraining } from '../lib/neural';
+import { validateTraining } from '../lib/neural';
+import { trainDenseTfjsNetwork } from '../lib/dense-tfjs';
 import { trainCnnNetwork, validateCnnTraining } from '../lib/cnn';
 import { emptyWorkspace, readWorkspace, saveWorkspace } from '../lib/storage';
 import { validateArchitectureDraft } from '../features/architectures/validation';
@@ -139,7 +140,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         updateRun(run.id, { metrics: [...metricHistory] });
       };
       const cnnResult = architecture.family === 'cnn' ? await trainCnnNetwork(dataset, architecture, config, () => controller.cancelled, onMetric) : null;
-      const model = architecture.family === 'cnn' ? cnnResult?.network : await trainDenseNetwork(dataset, architecture, config, () => controller.cancelled, onMetric);
+      const model = architecture.family === 'cnn' ? cnnResult?.network : await trainDenseTfjsNetwork(dataset, architecture, config, () => controller.cancelled, onMetric);
       if (controller.cancelled || !model) {
         updateRun(run.id, { status: 'cancelled', completedAt: now() });
       } else {
