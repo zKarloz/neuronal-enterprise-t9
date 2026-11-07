@@ -1,3 +1,5 @@
+> **Actualización v0.12.1:** el motor Feedforward nuevo usa TensorFlow.js (clasificación binaria y regresión); la CNN ya usaba TensorFlow.js. El motor TypeScript anterior permanece solo para compatibilidad de los modelos históricos y sus pruebas de regresión. Ejecuta `npm run test:tfjs` para verificar entrenamiento y predicción reales con TensorFlow.js. Los datos siguen en el navegador y **no** se sincronizan automáticamente con Google.
+
 > **v0.5.0:** Este frontend mantiene la ejecución local y añade **M05 → Servidor** para CSV remotos mediante FastAPI. Consulta `../../docs/operations/DATASETS_REMOTOS_V050.md` para configurar Supabase Storage y el despliegue. Los proyectos/datasets locales no se transfieren automáticamente.
 
 # NeuroLab Enterprise v0.3.1 — CNN con importación de fotografías propias
@@ -64,7 +66,7 @@ El importador valida el formato y acepta de **30 a 5.000** registros, 65 columna
 
 ## Compatibilidad y limitaciones
 
-- **Feedforward** continúa funcionando con datasets CSV tabulares. El motor CNN **no utiliza el motor Feedforward**; TensorFlow.js se carga solo para operaciones CNN. RNN y GAN siguen siendo documentales.
+- **Feedforward** sigue usando datasets CSV tabulares, ahora con TensorFlow.js. El motor CNN también utiliza TensorFlow.js; se carga bajo demanda para ambas familias. RNN y GAN siguen siendo documentales.
 - Se mantienen las diez carpetas dentro de `src/features/`, con `index.ts` por módulo, diseño responsive y scrollbars minimalistas.
 - El dataset del proyecto es único; importar otro lo reemplaza, pero el historial de entrenamiento y los modelos persistidos continúan registrados. Para predecir con muestras etiquetadas necesitas el CSV original; para imágenes propias en M08 basta contar con los pesos de una CNN entrenada.
 - La CNN se ajusta únicamente para **dígitos 8×8 de diez clases**. La importación de PNG/JPG/WebP solo admite **un dígito por fotografía**: no segmenta varios números ni añade fotos al entrenamiento. No es un clasificador universal de imágenes. No se ofrece ejecución persistente en segundo plano.

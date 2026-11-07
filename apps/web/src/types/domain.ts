@@ -69,6 +69,8 @@ export interface TrainingRun {
 }
 export interface NetworkLayer { weights: number[][]; biases: number[]; activation: Activation | 'linear'; }
 export interface TrainedNetwork {
+  /** Ausente en modelos históricos TypeScript; permite distinguir las nuevas ejecuciones TF.js. */
+  engine?: 'tfjs';
   layers: NetworkLayer[];
   means: number[];
   stds: number[];

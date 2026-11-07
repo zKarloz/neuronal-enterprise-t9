@@ -27,6 +27,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Probar núcleo
         run: npm run test:core
+      - name: Entrenamiento Feedforward real con TensorFlow.js
+        run: npm run test:tfjs
       - name: Comprobar TypeScript
         run: npm run typecheck
       - name: Compilar frontend

@@ -1,4 +1,6 @@
-# NeuroLab Enterprise v0.12.0 — Primera etapa frontend-first
+> **v0.12.1 — Consolidación del motor local.** Feedforward y CNN utilizan TensorFlow.js para entrenar en el navegador; modelos Feedforward antiguos de TypeScript siguen siendo inferibles. La cuenta Google aún no sincroniza el espacio local. Ver `docs/operations/FEEDFORWARD_TFJS_V121.md`.
+
+# NeuroLab Enterprise v0.12.1 — Feedforward TensorFlow.js en el navegador
 
 Plataforma modular React/TypeScript/Tailwind/Lucide + FastAPI + PostgreSQL/Supabase + TensorFlow/Keras.
 
@@ -58,7 +60,7 @@ Ver `docs/operations/ADMINISTRACION_RBAC_V110.md`.
 - **Interfaz única por módulo:** las pestañas Navegador/Servidor dejan de mostrarse. La pantalla principal utiliza las funciones y entrenamiento reales del navegador.
 - **Archivo remoto conservado:** desde **Administración → Herramientas avanzadas → Consultar archivo remoto** se pueden abrir los módulos de FastAPI usando `?vista=servidor`. Los datos remotos no se eliminan ni se copian automáticamente.
 - **Google OAuth:** el retorno PKCE se resuelve a nivel global; el inicio de sesión no depende de que la vista remota de Proyectos esté montada.
-- **Limitación conocida:** Feedforward local usa un motor propio TypeScript; CNN 8×8 usa TensorFlow.js. La conversión de Feedforward a TensorFlow.js y la sincronización segura navegador↔cuenta son entregas posteriores. El acceso Google es opcional en esta etapa para no asociar por error los datos locales a una cuenta.
+- **Estado v0.12.1:** Feedforward y CNN 8×8 entrenan realmente con TensorFlow.js. La sincronización segura navegador↔cuenta sigue siendo una entrega posterior. El acceso Google es opcional en esta etapa para no asociar por error los datos locales a una cuenta.
 - Sin cambios en FastAPI, worker, almacenamiento, migraciones ni modelos `.keras` existentes. La API permanece en v0.11.0.
 
 Consulta `docs/operations/TRANSICION_FRONTEND_FIRST_V120.md`.
